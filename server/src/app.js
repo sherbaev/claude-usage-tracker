@@ -136,6 +136,8 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     log,
   });
 
+  tg.upgradeWebhooks().catch((error) => log(`telegram webhook upgrade failed: ${error.message}`));
+
   function limitTelegram(user) {
     if (!telegramLimiter(`u${user.id}`)) throw new HttpError(429, 'too many Telegram actions, try again later');
     return user;

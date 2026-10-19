@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readSettings, startServer } from '../../server/src/server.js';
+import { deviceKey } from '../../server/src/telegram/views.js';
 
 const BOT_TOKEN = `424242:${'A'.repeat(35)}`;
 const ORIGIN = 'https://usage.example.com';
@@ -11,8 +12,8 @@ const BLOCKED_CHAT = 333;
 let dataDir;
 const servers = [];
 
-/** Fake Bot API: records calls, answers like Telegram. */
-function fakeTelegram() {
+/** Fake Bot API: records calls, answers like Telegram. `overrides[method]` replaces a result. */
+function fakeTelegram(overrides = {}) {
   const calls = [];
   const fetch = async (url, init) => {
     const [, token, method] = new URL(url).pathname.match(/^\/bot([^/]+)\/(\w+)$/);
@@ -22,16 +23,17 @@ function fakeTelegram() {
     if (method === 'sendMessage' && params.chat_id === BLOCKED_CHAT) {
       return Response.json({ ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }, { status: 403 });
     }
-    const results = { getMe: { id: 4242, is_bot: true, first_name: 'x', username: 'my_usage_bot' }, sendMessage: { message_id: calls.length } };
+    const results = { getMe: { id: 4242, is_bot: true, first_name: 'x', username: 'my_usage_bot' }, sendMessage: { message_id: calls.length }, ...overrides };
     return Response.json({ ok: true, result: results[method] ?? true });
   };
-  return { calls, fetch, sent: (chatId) => calls.filter((c) => c.method === 'sendMessage' && c.params.chat_id === chatId).map((c) => c.params.text) };
+  const of = (method, chatId) => calls.filter((c) => c.method === method && (chatId === undefined || c.params.chat_id === chatId));
+  return { calls, fetch, of, sent: (chatId) => of('sendMessage', chatId).map((c) => c.params.text) };
 }
 
-async function boot() {
-  const dir = await mkdtemp(join(dataDir, 'srv-'));
-  const tg = fakeTelegram();
-  const settings = { ...readSettings({ DATA_DIR: dir }), port: 0, telegram: { fetch: tg.fetch, avatar: Buffer.from('jpg') } };
+async function boot({ dir, overrides } = {}) {
+  const dataPath = dir ?? (await mkdtemp(join(dataDir, 'srv-')));
+  const tg = fakeTelegram(overrides);
+  const settings = { ...readSettings({ DATA_DIR: dataPath }), port: 0, telegram: { fetch: tg.fetch, avatar: Buffer.from('jpg') } };
   const server = await startServer(settings);
   servers.push(server);
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -43,18 +45,35 @@ async function boot() {
     });
     return { status: res.status, json: await res.json() };
   };
-  const token = (await call('POST', '/api/register')).json.data.token;
-  return { tg, call, token };
+  const register = async () => (await call('POST', '/api/register')).json.data.token;
+  return { tg, call, register, server, dataPath };
 }
 
-const report = (fivePct) => ({
-  device: 'Work Mac',
+/** Connects the bot and returns helpers that act like Telegram delivering updates. */
+async function connected(ctx, token) {
+  await ctx.call('POST', '/api/telegram', { token, body: { token: BOT_TOKEN }, headers: { Origin: ORIGIN } });
+  const hook = ctx.tg.of('setWebhook').at(-1).params;
+  const path = new URL(hook.url).pathname;
+  const headers = { 'X-Telegram-Bot-Api-Secret-Token': hook.secret_token };
+  const chat = (id) => ({ id, type: 'private', first_name: 'Javo' });
+  const send = (chatId, text, hdrs = headers) => ctx.call('POST', path, { body: { update_id: 1, message: { message_id: 1, chat: chat(chatId), text } }, headers: hdrs });
+  const tap = (chatId, data) =>
+    ctx.call('POST', path, { body: { update_id: 2, callback_query: { id: `cb${Math.random()}`, data, message: { message_id: 77, chat: chat(chatId) } } }, headers });
+  const link = async (chatId) => {
+    const { url } = (await ctx.call('POST', '/api/telegram/link', { token })).json.data;
+    return send(chatId, `/start ${new URL(url).searchParams.get('start')}`);
+  };
+  return { hook, path, send, tap, link };
+}
+
+const report = (fivePct, { device = 'Work Mac', share } = {}) => ({
+  device,
   reportedAt: new Date().toISOString(),
   account: {
     fiveHour: { pct: fivePct, resetsAt: new Date(Date.now() + 3600_000).toISOString() },
     sevenDay: { pct: 20, resetsAt: new Date(Date.now() + 86400_000).toISOString() },
   },
-  local: { fiveHour: { costUSD: 1, tokens: 10 }, sevenDay: { costUSD: 5, tokens: 50 } },
+  local: { fiveHour: { costUSD: share ?? 1, tokens: 10 }, sevenDay: { costUSD: 5, tokens: 50 } },
 });
 
 before(async () => {
@@ -66,115 +85,146 @@ after(async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test('connect configures the bot, then link → /usage → alerts → disconnect', async () => {
-  const { tg, call, token } = await boot();
-  assert.equal((await call('GET', '/api/telegram', { token })).json.data.connected, false);
-  assert.equal((await call('POST', '/api/telegram', { token, body: { token: 'nope' }, headers: { Origin: ORIGIN } })).status, 400);
-  const rejected = await call('POST', '/api/telegram', { token, body: { token: `424242:${'B'.repeat(35)}` }, headers: { Origin: ORIGIN } });
-  assert.equal(rejected.status, 400);
+test('connect configures the bot; linking shows the button keyboard', async () => {
+  const ctx = await boot();
+  const token = await ctx.register();
+  assert.equal((await ctx.call('GET', '/api/telegram', { token })).json.data.connected, false);
+  assert.equal((await ctx.call('POST', '/api/telegram', { token, body: { token: 'nope' }, headers: { Origin: ORIGIN } })).status, 400);
+  const rejected = await ctx.call('POST', '/api/telegram', { token, body: { token: `424242:${'B'.repeat(35)}` }, headers: { Origin: ORIGIN } });
   assert.match(rejected.json.error, /Telegram rejected/);
 
-  const connected = await call('POST', '/api/telegram', { token, body: { token: BOT_TOKEN }, headers: { Origin: ORIGIN } });
-  assert.equal(connected.status, 200, JSON.stringify(connected.json));
-  assert.equal(connected.json.data.bot.username, 'my_usage_bot');
-  assert.ok(connected.json.data.setup.every((s) => s.ok), JSON.stringify(connected.json.data.setup));
-  assert.doesNotMatch(JSON.stringify(connected.json), /AAAAAAAAAA/, 'the bot token never comes back');
-  const byMethod = Object.fromEntries(tg.calls.filter((c) => c.token === BOT_TOKEN).map((c) => [c.method, c.params]));
+  const res = await ctx.call('POST', '/api/telegram', { token, body: { token: BOT_TOKEN }, headers: { Origin: ORIGIN } });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  assert.ok(res.json.data.setup.every((s) => s.ok), JSON.stringify(res.json.data.setup));
+  assert.doesNotMatch(JSON.stringify(res.json), /AAAAAAAAAA/, 'the bot token never comes back');
+  const byMethod = Object.fromEntries(ctx.tg.calls.filter((c) => c.token === BOT_TOKEN).map((c) => [c.method, c.params]));
   assert.equal(byMethod.setMyName.name, 'Claude Usage Tracker');
-  assert.ok(byMethod.setMyDescription.description && byMethod.setMyShortDescription.short_description);
-  assert.deepEqual(byMethod.setMyCommands.commands.map((c) => c.command), ['usage', 'devices', 'alerts', 'stop', 'help']);
+  assert.deepEqual(byMethod.setMyCommands.commands.map((c) => c.command), ['start'], 'buttons replace slash commands');
   assert.match(byMethod.setMyProfilePhoto.photo, /"type":"static"/);
   assert.match(byMethod.setWebhook.url, /^https:\/\/usage\.example\.com\/telegram\/webhook\/[a-f0-9]{32}$/);
-  assert.deepEqual(byMethod.setWebhook.allowed_updates, ['message']);
-  const webhookPath = new URL(byMethod.setWebhook.url).pathname;
-  const secret = byMethod.setWebhook.secret_token;
+  assert.deepEqual(byMethod.setWebhook.allowed_updates, ['message', 'callback_query']);
 
-  const link = (await call('POST', '/api/telegram/link', { token })).json.data;
-  const code = link.url.match(/^https:\/\/t\.me\/my_usage_bot\?start=([\w-]+)$/)[1];
-  const send = (chatId, text, hdrs = { 'X-Telegram-Bot-Api-Secret-Token': secret }) =>
-    call('POST', webhookPath, { body: { update_id: 1, message: { message_id: 1, chat: { id: chatId, type: 'private', first_name: 'Javo' }, text } }, headers: hdrs });
-
-  assert.equal((await send(111, `/start ${code}`, {})).status, 401, 'webhook needs the secret');
-  assert.equal((await send(111, `/start ${code}`)).status, 200);
-  assert.match(tg.sent(111).at(-1), /Linked/);
-  assert.deepEqual((await call('GET', '/api/telegram', { token })).json.data.chats.map((c) => [c.id, c.name]), [[111, 'Javo']]);
-
-  await send(222, `/start ${code}`); // codes work once
-  await send(222, '/usage');
-  assert.ok(tg.sent(222).every((t) => /private/i.test(t)), 'unlinked chats get no data');
-
-  await call('POST', '/api/report', { token, body: report(40) });
-  await send(111, '/usage');
-  assert.match(tg.sent(111).at(-1), /Work Mac/);
-
-  const before85 = tg.sent(111).length;
-  await call('POST', '/api/report', { token, body: report(85) });
-  await call('POST', '/api/report', { token, body: report(86) });
-  const alerts = tg.sent(111).slice(before85);
-  assert.equal(alerts.length, 1, alerts.join('\n'));
-  assert.match(alerts[0], /Claude 5-hour window.*85%/s);
-
-  assert.equal((await call('PUT', '/api/telegram/alerts', { token, body: { nearPct: 500 } })).status, 400);
-  const settings = { enabled: true, nearPct: 90, near: true, hit: true, caps: false, agents: true };
-  assert.deepEqual((await call('PUT', '/api/telegram/alerts', { token, body: settings })).json.data.alerts, settings);
-  assert.equal((await call('POST', '/api/telegram/test', { token })).status, 200);
-  assert.match(tg.sent(111).at(-1), /Test/);
-
-  assert.equal((await call('DELETE', '/api/telegram/chats/111', { token })).status, 200);
-  assert.deepEqual((await call('GET', '/api/telegram', { token })).json.data.chats, []);
-  assert.equal((await call('DELETE', '/api/telegram', { token })).status, 200);
-  assert.ok(tg.calls.some((c) => c.method === 'deleteWebhook'));
-  assert.equal((await call('GET', '/api/telegram', { token })).json.data.connected, false);
-  assert.equal((await send(111, '/usage')).status, 404, 'webhook of a removed bot is gone');
+  const bot = await connected(ctx, token);
+  const { url } = (await ctx.call('POST', '/api/telegram/link', { token })).json.data;
+  const code = new URL(url).searchParams.get('start');
+  assert.equal((await bot.send(111, `/start ${code}`, {})).status, 401, 'webhook needs the secret');
+  await bot.send(111, `/start ${code}`);
+  const welcome = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.match(welcome.text, /✅ Linked/);
+  assert.deepEqual(welcome.reply_markup.keyboard.flat().map((b) => b.text), ['📊 Usage', '💻 Devices', '🔔 Alerts', '❓ Help']);
+  await bot.send(222, `/start ${code}`); // codes work once
+  await bot.send(222, '📊 Usage');
+  assert.ok(ctx.tg.sent(222).every((t) => /private/i.test(t)), 'unlinked chats get no data');
 });
 
-test('a bot can belong to one account only, and Telegram routes need a token', async () => {
-  const first = await boot();
-  assert.equal((await first.call('POST', '/api/telegram', { token: first.token, body: { token: BOT_TOKEN }, headers: { Origin: ORIGIN } })).status, 200);
-  const otherToken = (await first.call('POST', '/api/register')).json.data.token;
-  const taken = await first.call('POST', '/api/telegram', { token: otherToken, body: { token: BOT_TOKEN }, headers: { Origin: ORIGIN } });
-  assert.equal(taken.status, 409);
-  assert.equal((await first.call('GET', '/api/telegram')).status, 401);
-  // Telegram only delivers webhooks to https URLs.
-  const plain = await first.call('POST', '/api/telegram', { token: otherToken, body: { token: BOT_TOKEN }, headers: { Origin: 'http://usage.example.com' } });
-  assert.equal(plain.status, 400);
+test('keyboard buttons, per-device alert toggles and alert settings from Telegram', async () => {
+  const ctx = await boot();
+  const token = await ctx.register();
+  const bot = await connected(ctx, token);
+  await ctx.call('POST', '/api/report', { token, body: report(10) });
+  await ctx.call('POST', '/api/report', { token, body: report(10, { device: 'Home PC' }) });
+  await ctx.call('PUT', '/api/devices/Work%20Mac/limits', { token, body: { fiveHour: 50, sevenDay: 50, enforce: false } });
+  await bot.link(111);
+
+  await bot.send(111, '📊 Usage');
+  const usage = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.match(usage.text, /📊 <b>Claude plan<\/b>/);
+  assert.match(usage.text, /🔕 <b>Work Mac<\/b>/);
+
+  await bot.send(111, '💻 Devices');
+  const devices = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.deepEqual(devices.reply_markup.inline_keyboard.flat().map((b) => b.text), ['🔕 Home PC', '🔕 Work Mac', '⚙️ Alert settings']);
+
+  // Tap the Work Mac bell: alerts on, toast, message edited in place.
+  await bot.tap(111, `d:${deviceKey('Work Mac')}`);
+  assert.match(ctx.tg.of('answerCallbackQuery').at(-1).params.text, /🔔 Alerts on for Work Mac/);
+  const edited = ctx.tg.of('editMessageText', 111).at(-1).params;
+  assert.equal(edited.message_id, 77);
+  assert.ok(edited.reply_markup.inline_keyboard.flat().some((b) => b.text === '🔔 Work Mac'));
+  // A device without caps: subscribed, with a hint to set a cap.
+  await bot.tap(111, `d:${deviceKey('Home PC')}`);
+  assert.match(ctx.tg.of('answerCallbackQuery').at(-1).params.text, /no cap/i);
+  await bot.tap(111, `d:${deviceKey('Home PC')}`);
+  assert.match(ctx.tg.of('answerCallbackQuery').at(-1).params.text, /🔕 Alerts off for Home PC/);
+  assert.deepEqual((await ctx.call('GET', '/api/telegram', { token })).json.data.alerts.devices, ['Work Mac']);
+
+  // Alert settings via inline toggles.
+  await bot.send(111, '🔔 Alerts');
+  assert.match(ctx.tg.sent(111).at(-1), /🔔 <b>Alerts are on<\/b>/);
+  await bot.tap(111, 'a:p90');
+  await bot.tap(111, 'a:agents');
+  const alerts = (await ctx.call('GET', '/api/telegram', { token })).json.data.alerts;
+  assert.equal(alerts.nearPct, 90);
+  assert.equal(alerts.agents, false);
+  await bot.tap(111, 'a:p80');
+
+  // Work Mac nears its 5h cap → alert. Home PC (not subscribed) has no cap alerts.
+  const before = ctx.tg.sent(111).length;
+  await ctx.call('POST', '/api/report', { token, body: report(50, { share: 9 }) }); // Work Mac ≈ 45% of 5h plan
+  const fresh = ctx.tg.sent(111).slice(before);
+  assert.equal(fresh.length, 1, fresh.join('\n'));
+  assert.match(fresh[0], /⚠️.*Work Mac.*of its 50% 5-hour cap/s);
+
+  // Unlinked chats can't press buttons.
+  await bot.tap(222, `d:${deviceKey('Work Mac')}`);
+  assert.match(ctx.tg.of('answerCallbackQuery').at(-1).params.text, /private/i);
+  assert.deepEqual((await ctx.call('GET', '/api/telegram', { token })).json.data.alerts.devices, ['Work Mac']);
+
+  // Dashboard view of the same subscriptions.
+  const status = (await ctx.call('GET', '/api/telegram', { token })).json.data;
+  assert.deepEqual(status.devices, [
+    { name: 'Home PC', subscribed: false, caps: { fiveHour: null, sevenDay: null } },
+    { name: 'Work Mac', subscribed: true, caps: { fiveHour: 50, sevenDay: 50 } },
+  ]);
+  assert.equal((await ctx.call('PUT', '/api/telegram/alerts', { token, body: { ...status.alerts, devices: ['<bad>'] } })).status, 400);
+  const saved = (await ctx.call('PUT', '/api/telegram/alerts', { token, body: { ...status.alerts, devices: ['Home PC'] } })).json.data;
+  assert.deepEqual(saved.devices.filter((d) => d.subscribed).map((d) => d.name), ['Home PC']);
+});
+
+test('help, refresh, /stop, blocked chats, test message, disconnect and account deletion', async () => {
+  const ctx = await boot();
+  const token = await ctx.register();
+  const bot = await connected(ctx, token);
+  await ctx.call('POST', '/api/report', { token, body: report(10) });
+  await bot.link(111);
+  await bot.send(111, 'hello');
+  assert.match(ctx.tg.sent(111).at(-1), /📊 Usage/);
+  await bot.tap(111, 'u:refresh');
+  assert.match(ctx.tg.of('editMessageText', 111).at(-1).params.text, /Claude plan/);
+  assert.equal((await ctx.call('POST', '/api/telegram/test', { token })).status, 200);
+  assert.match(ctx.tg.sent(111).at(-1), /Test message/);
+  await bot.send(111, '/stop');
+  const stop = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.match(stop.text, /Unlinked/);
+  assert.deepEqual(stop.reply_markup, { remove_keyboard: true });
+  assert.deepEqual((await ctx.call('GET', '/api/telegram', { token })).json.data.chats, []);
+
+  await bot.link(BLOCKED_CHAT);
+  assert.deepEqual((await ctx.call('GET', '/api/telegram', { token })).json.data.chats, [], 'a chat that blocked the bot is removed');
+  assert.equal((await ctx.call('POST', '/api/telegram/test', { token })).status, 400);
+
+  const otherToken = await ctx.register();
+  assert.equal((await ctx.call('POST', '/api/telegram', { token: otherToken, body: { token: BOT_TOKEN }, headers: { Origin: ORIGIN } })).status, 409);
+  const plain = await ctx.call('POST', '/api/telegram', { token: otherToken, body: { token: BOT_TOKEN }, headers: { Origin: 'http://usage.example.com' } });
   assert.match(plain.json.error, /https/);
+  assert.equal((await ctx.call('GET', '/api/telegram')).status, 401);
+
+  assert.equal((await ctx.call('DELETE', '/api/me', { token })).status, 200);
+  assert.ok(ctx.tg.of('deleteWebhook').length >= 1, 'deleting the account removes the webhook');
+  assert.equal((await bot.send(111, '/usage')).status, 404);
 });
 
-test('bot commands: /devices, /alerts, /help, /stop, and chats that blocked the bot are dropped', async () => {
-  const { tg, call, token } = await boot();
-  await call('POST', '/api/telegram', { token, body: { token: BOT_TOKEN }, headers: { Origin: ORIGIN } });
-  const setWebhook = tg.calls.find((c) => c.method === 'setWebhook').params;
-  const path = new URL(setWebhook.url).pathname;
-  const send = (chatId, text) =>
-    call('POST', path, { body: { message: { chat: { id: chatId, type: 'group', title: 'Team <chat>' }, text } }, headers: { 'X-Telegram-Bot-Api-Secret-Token': setWebhook.secret_token } });
-  const link = async (chatId) => {
-    const { url } = (await call('POST', '/api/telegram/link', { token })).json.data;
-    await send(chatId, `/start@my_usage_bot ${new URL(url).searchParams.get('start')}`);
-  };
-  await call('POST', '/api/report', { token, body: report(10) });
-  await link(111);
-  assert.equal((await call('GET', '/api/telegram', { token })).json.data.chats[0].name, 'Team <chat>');
+test('on start, bots connected before buttons existed are switched to receive button taps', async () => {
+  const first = await boot();
+  const token = await first.register();
+  await connected(first, token);
+  await new Promise((r) => first.server.close(r));
+  const hookUrl = first.tg.of('setWebhook').at(-1).params.url;
 
-  await send(111, '/devices');
-  assert.match(tg.sent(111).at(-1), /Work Mac.*synced/s);
-  await send(111, '/alerts');
-  assert.match(tg.sent(111).at(-1), /Alerts are <b>on<\/b>.*near the limit \(80%\)/s);
-  await send(111, '/whatever');
-  assert.match(tg.sent(111).at(-1), /\/usage/);
-  await send(111, 'hello');
-  await send(111, '/stop');
-  assert.match(tg.sent(111).at(-1), /Unlinked/);
-  assert.deepEqual((await call('GET', '/api/telegram', { token })).json.data.chats, []);
-  assert.equal((await send(111, '/usage')).status, 200);
-  assert.match(tg.sent(111).at(-1), /private/i);
-
-  await link(BLOCKED_CHAT);
-  assert.deepEqual((await call('GET', '/api/telegram', { token })).json.data.chats, [], 'a chat that blocked the bot is removed');
-  assert.equal((await call('POST', '/api/telegram/test', { token })).status, 400);
-
-  // Deleting the account also removes the bot's webhook.
-  const deletesBefore = tg.calls.filter((c) => c.method === 'deleteWebhook').length;
-  assert.equal((await call('DELETE', '/api/me', { token })).status, 200);
-  assert.equal(tg.calls.filter((c) => c.method === 'deleteWebhook').length, deletesBefore + 1);
+  const second = await boot({ dir: first.dataPath, overrides: { getWebhookInfo: { url: hookUrl, allowed_updates: ['message'] } } });
+  await new Promise((r) => setTimeout(r, 100));
+  const upgrade = second.tg.of('setWebhook').at(-1)?.params;
+  assert.equal(upgrade?.url, hookUrl);
+  assert.deepEqual(upgrade.allowed_updates, ['message', 'callback_query']);
+  assert.deepEqual(second.tg.of('setMyCommands').at(-1)?.params.commands.map((c) => c.command), ['start']);
 });

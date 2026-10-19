@@ -89,16 +89,20 @@ Connect a Telegram bot from the dashboard and get your usage, plus alerts, in Te
 3. Click **Link a chat** and open the link on the Telegram account that should get messages. Link as many chats as
    you like (yourself, a teammate, a group). Each link works once and expires after 10 minutes.
 
-| Command | |
-|---|---|
-| `/usage` | Plan windows (5h / weekly), every device's share and cap, Codex and other agents |
-| `/devices` | Devices and when they last synced |
-| `/alerts` | Your alert settings |
-| `/stop` | Stop messages to this chat |
+The bot is driven by buttons, no commands to remember:
 
-**Alerts**: choose on the dashboard when to be notified: near the limit (default 80%), limit reached, a device
-near or over its cap, and Codex's own limits. Each alert is sent once per window, when a device reports (about every
-5 minutes while in use).
+| Button | |
+|---|---|
+| 📊 **Usage** | Plan windows (5h / weekly) as emoji bars, every device's share and cap, Codex and other agents. 🔄 Refresh in place |
+| 💻 **Devices** | Every device with its caps and current usage. Tap a device's 🔔 / 🔕 button to turn its alerts on or off |
+| 🔔 **Alerts** | Turn alerts on or off, choose near-limit (70 / 80 / 90%) and limit-reached alerts, Codex alerts |
+| ❓ **Help** | What each button does. Send `/stop` to unlink a chat |
+
+**Per-device alerts**: subscribe only to the devices you care about, from the 💻 Devices buttons in Telegram or
+**Device alerts** on the dashboard. Give a device caps (e.g. 50% of the 5-hour and 50% of the weekly limit) under
+**Devices → Set cap**. You'll get ⚠️ when it gets near either cap and 🚨 when it reaches one. Account-wide alerts
+(Claude near/at its 5-hour or weekly limit, Codex) don't depend on devices. Each alert is sent once per window,
+when a device reports (about every 5 minutes while in use).
 
 The bot only answers chats you linked. Bot tokens are stored encrypted on the server.
 

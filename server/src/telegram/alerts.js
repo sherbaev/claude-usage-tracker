@@ -1,12 +1,24 @@
 // Which usage alerts to send. Pure: the caller stores `state` (last level sent per key and window)
-// so each alert goes out once per level per window.
+// so each alert goes out once per level per window. Device cap alerts only go out for devices the
+// user subscribed to (`settings.devices`).
+import { isValidDeviceName } from '../../../plugin/scripts/core.js';
+
 const SAME_WINDOW_MS = 2 * 60 * 1000; // Anthropic's reset times jitter by milliseconds
 const LEVEL_RANK = Object.freeze({ near: 1, hit: 2 });
 const MIN_NEAR_PCT = 1;
 const MAX_NEAR_PCT = 99;
-const TOGGLES = ['enabled', 'near', 'hit', 'caps', 'agents'];
+const MAX_SUBSCRIBED_DEVICES = 50;
+const TOGGLES = ['enabled', 'near', 'hit', 'agents'];
 
-export const DEFAULT_ALERTS = Object.freeze({ enabled: true, nearPct: 80, near: true, hit: true, caps: true, agents: true });
+export const DEFAULT_ALERTS = Object.freeze({ enabled: true, nearPct: 80, near: true, hit: true, agents: true, devices: Object.freeze([]) });
+
+/** Stored settings → current shape (settings saved before per-device alerts had `caps` and no `devices`). */
+export function normalizeAlertSettings(stored) {
+  if (stored == null || typeof stored !== 'object') return DEFAULT_ALERTS;
+  const pick = (key) => (typeof stored[key] === typeof DEFAULT_ALERTS[key] ? stored[key] : DEFAULT_ALERTS[key]);
+  const devices = Array.isArray(stored.devices) ? stored.devices.filter(isValidDeviceName) : [];
+  return { enabled: pick('enabled'), nearPct: pick('nearPct'), near: pick('near'), hit: pick('hit'), agents: pick('agents'), devices };
+}
 
 /** Validates alert settings from the website (server boundary). */
 export function validateAlertSettings(body) {
@@ -18,7 +30,11 @@ export function validateAlertSettings(body) {
   if (!Number.isFinite(nearPct) || nearPct < MIN_NEAR_PCT || nearPct > MAX_NEAR_PCT) {
     throw new Error(`nearPct must be a number between ${MIN_NEAR_PCT} and ${MAX_NEAR_PCT}`);
   }
-  return { enabled: body.enabled, nearPct, near: body.near, hit: body.hit, caps: body.caps, agents: body.agents };
+  const { devices } = body;
+  if (!Array.isArray(devices) || devices.length > MAX_SUBSCRIBED_DEVICES || !devices.every(isValidDeviceName)) {
+    throw new Error(`devices must be a list of up to ${MAX_SUBSCRIBED_DEVICES} device names`);
+  }
+  return { enabled: body.enabled, nearPct, near: body.near, hit: body.hit, agents: body.agents, devices: [...new Set(devices)] };
 }
 
 const planCandidates = (account) =>
@@ -60,7 +76,7 @@ const isSameWindow = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= SAME_W
 
 function isWanted(c, level, settings) {
   if (!level || !settings[level]) return false;
-  if (c.kind === 'cap') return settings.caps;
+  if (c.kind === 'cap') return settings.devices.includes(c.device);
   if (c.kind === 'agent') return settings.agents;
   return true;
 }

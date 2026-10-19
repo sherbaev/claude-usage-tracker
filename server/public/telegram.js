@@ -118,7 +118,7 @@ function chatsSection(state) {
       });
       return el('li', {}, [el('div', {}, [el('strong', { textContent: c.name }), el('div', { className: 'muted small', textContent: `linked ${fmtAgo(c.linkedAt)}` })]), unlink]);
     }))
-    : el('p', { className: 'muted small', textContent: 'No chats linked yet. Link one to get alerts and use /usage.' });
+    : el('p', { className: 'muted small', textContent: 'No chats linked yet. Link one to get alerts and the 📊 Usage buttons.' });
 
   const status = statusLine();
   const linkBox = el('div', { className: 'tglink', hidden: !state.link });
@@ -154,6 +154,25 @@ function checkbox(id, label, checked, help) {
   return { input, node: el('div', { className: 'tgcheck' }, [input, el('label', { htmlFor: id }, [el('span', { textContent: label }), help ? el('span', { className: 'muted small', textContent: help }) : ''])]) };
 }
 
+const tgCapText = (caps) => [caps.fiveHour != null && `5h cap ${caps.fiveHour}%`, caps.sevenDay != null && `weekly cap ${caps.sevenDay}%`].filter(Boolean).join(' · ');
+
+/** One checkbox per device: alerts when that device nears or reaches its caps. Same list as the 🔔 buttons in Telegram. */
+function deviceAlerts(devices) {
+  const boxes = devices.map((d, i) => {
+    const caps = tgCapText(d.caps);
+    const help = caps || 'No cap set — use Set cap in Devices above, or this device has nothing to alert on.';
+    const box = checkbox(`tgDev${i}`, d.name, d.subscribed, help);
+    if (!caps) box.node.classList.add('tgnocap');
+    return { name: d.name, ...box };
+  });
+  const body = boxes.length ? boxes.map((b) => b.node) : [el('p', { className: 'muted small', textContent: 'No devices yet.' })];
+  const node = el('fieldset', { className: 'tgdevices' }, [
+    el('legend', {}, [el('span', { textContent: 'Device alerts' }), el('span', { className: 'muted small', textContent: ' — when a device nears or reaches its cap. Also toggled with the 🔔 buttons in Telegram.' })]),
+    ...body,
+  ]);
+  return { node, selected: () => boxes.filter((b) => b.input.checked).map((b) => b.name) };
+}
+
 function alertsSection(state) {
   const a = state.alerts;
   const enabled = checkbox('tgEnabled', 'Send alerts', a.enabled, 'Master switch for every alert below.');
@@ -161,9 +180,9 @@ function alertsSection(state) {
   const nearPct = el('input', { id: 'tgNearPct', type: 'number', min: '1', max: '99', step: '1', value: String(a.nearPct), ariaLabel: 'Near-limit threshold in percent', className: 'tgpct' });
   near.node.querySelector('label').append(el('span', { className: 'tgpctrow' }, ['at ', nearPct, ' % of the limit']));
   const hit = checkbox('tgHit', 'Limit reached', a.hit, '100% of a 5-hour or weekly window.');
-  const caps = checkbox('tgCaps', 'Per-device caps', a.caps, 'When a device nears or reaches the cap you set for it.');
   const agents = checkbox('tgAgents', 'Codex and other agents', a.agents, 'Their own 5-hour / weekly limits, when they report one.');
-  const sub = el('fieldset', { className: 'tgsub' }, [el('legend', { className: 'sr-only', textContent: 'Which alerts' }), near.node, hit.node, caps.node, agents.node]);
+  const devices = deviceAlerts(state.devices);
+  const sub = el('fieldset', { className: 'tgsub' }, [el('legend', { className: 'sr-only', textContent: 'Which alerts' }), near.node, hit.node, agents.node, devices.node]);
   const syncDisabled = () => { sub.disabled = !enabled.input.checked; };
   enabled.input.addEventListener('change', syncDisabled);
   syncDisabled();
@@ -173,7 +192,7 @@ function alertsSection(state) {
   save.addEventListener('click', async () => {
     const body = {
       enabled: enabled.input.checked, near: near.input.checked, hit: hit.input.checked,
-      caps: caps.input.checked, agents: agents.input.checked, nearPct: Number(nearPct.value),
+      agents: agents.input.checked, nearPct: Number(nearPct.value), devices: devices.selected(),
     };
     const data = await tgAction(save, status, () => api('PUT', '/api/telegram/alerts', body), { success: 'Saved' });
     if (data) tgState = data;

@@ -207,6 +207,7 @@ function capEditor(device) {
       });
       editingDevice = null;
       await refresh();
+      loadTelegram(); // device caps show in the Telegram alert list
     } catch (e) {
       error.textContent = e.message;
       error.hidden = false;
