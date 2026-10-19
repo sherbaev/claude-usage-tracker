@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Claude Usage Tracker</title>
+  <title>Claude Multi-Device Usage Tracker — 5-hour &amp; weekly limits per device</title>
+  <meta name="description" content="Free, open-source tracker for Claude plan limits across all your devices: 5-hour and weekly usage per laptop, desktop and server, per-device caps, and a model / effort breakdown for Claude Code.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
@@ -12,7 +13,7 @@
   <header class="topbar">
     <div class="brand">
       <img src="/favicon.svg" alt="" width="22" height="22">
-      <span>Claude Usage Tracker</span>
+      <span>Claude Multi-Device Usage Tracker</span>
     </div>
     <nav id="nav" hidden>
       <span class="muted" id="refreshed"></span>
@@ -28,6 +29,7 @@
         See how much of your 5-hour and weekly Claude limits each laptop, desktop and server is using.
         One account token, as many devices as you like.
       </p>
+      <p class="stats" id="stats" hidden></p>
       <div class="grid2">
         <div class="card">
           <h2>New here</h2>
@@ -119,6 +121,7 @@ claude plugin install usage-tracker@claude-usage-tracker</code></pre>
 
   <footer>
     <a href="https://github.com/sherbaev/claude-usage-tracker" rel="noopener">Open source on GitHub</a>
+    <span class="muted" id="footerStats" hidden></span>
     <span class="muted">· Stores only device names, costs, token counts, model names, effort levels and plan %. Never prompts or code.</span>
   </footer>
 </body>

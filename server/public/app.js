@@ -360,6 +360,23 @@ document.addEventListener('click', async (event) => {
   setTimeout(() => { target.textContent = 'Copy'; }, 1500);
 });
 
+// ---------- public stats ----------
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+async function showStats() {
+  try {
+    const { activeUsers, activeDevices, windowDays } = await api('GET', '/api/stats');
+    if (!activeUsers) return;
+    const text = `${plural(activeUsers, 'active user')} · ${plural(activeDevices, 'device')} reporting in the last ${windowDays} days`;
+    $('stats').textContent = text;
+    $('stats').hidden = false;
+    $('footerStats').textContent = `· ${text}`;
+    $('footerStats').hidden = false;
+  } catch {
+    // Stats are decoration; the page works without them.
+  }
+}
+
 async function init() {
   $('register').addEventListener('click', onRegister);
   $('signin').addEventListener('click', onSignin);
@@ -373,6 +390,7 @@ async function init() {
   $('registerClosed').hidden = config.registration !== 'closed';
   $('register').hidden = config.registration === 'closed';
 
+  showStats();
   if (token) await openDashboard();
   else show('welcome');
 }

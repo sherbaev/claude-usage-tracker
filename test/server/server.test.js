@@ -115,7 +115,7 @@ test('serves the website with a strict CSP and health check', async () => {
   const page = await fetch(`${base}/`);
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
-  assert.match(await page.text(), /Claude Usage Tracker/);
+  assert.match(await page.text(), /Claude Multi-Device Usage Tracker/);
   assert.equal((await fetch(`${base}/app.js`)).headers.get('content-type'), 'text/javascript; charset=utf-8');
   assert.equal((await call('GET', '/health')).status, 200);
   assert.equal((await call('GET', '/api/config')).json.data.registration, 'open');
@@ -162,6 +162,20 @@ test('model · effort rows are validated and get their share of the device %', a
   ]);
   assert.deepEqual(summary.windows.fiveHour.find((r) => r.device === 'old-plugin').models, []);
   assert.deepEqual(summary.windows.sevenDay.find((r) => r.device === 'mac').models, []);
+});
+
+test('public stats count accounts and devices that reported in the last 7 days', async () => {
+  const { call, register } = await boot();
+  assert.deepEqual((await call('GET', '/api/stats')).json.data, { activeUsers: 0, activeDevices: 0, windowDays: 7 });
+  const alice = await register();
+  const bob = await register();
+  await register(); // never reports: not active
+  await call('POST', '/api/report', { token: alice, body: report('mac', 1) });
+  await call('POST', '/api/report', { token: alice, body: report('linux', 1) });
+  await call('POST', '/api/report', { token: bob, body: report('pc', 1) });
+  const stale = { ...report('old', 1), reportedAt: new Date(Date.now() - 8 * 86400_000).toISOString() };
+  await call('POST', '/api/report', { token: bob, body: stale });
+  assert.deepEqual((await call('GET', '/api/stats')).json.data, { activeUsers: 2, activeDevices: 3, windowDays: 7 });
 });
 
 test('rejects missing, malformed and unknown tokens', async () => {

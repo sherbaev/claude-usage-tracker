@@ -21,6 +21,9 @@ jobs:
       - run: docker build -t usage-tracker .
       - name: Smoke test
         run: |
-          docker run -d --name t -p 8787:8787 usage-tracker
+          docker run -d --name tracker -p 8787:8787 usage-tracker
           for i in $(seq 1 30); do curl -sf localhost:8787/health && break; sleep 1; done
           curl -sf -X POST localhost:8787/api/register | grep -q '"token":"cut_'
+      - name: Container logs
+        if: failure()
+        run: docker logs tracker
