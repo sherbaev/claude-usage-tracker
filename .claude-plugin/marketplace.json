@@ -1,18 +1,39 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "claude-usage-tracker",
-  "owner": { "name": "sherbaev", "url": "https://github.com/sherbaev" },
+  "owner": {
+    "name": "sherbaev",
+    "url": "https://github.com/sherbaev"
+  },
   "metadata": {
-    "description": "Self-hosted multi-device Claude plan usage tracker for Claude Code"
+    "description": "Claude Multi-Device Usage Tracker — Claude plan limits (5-hour / weekly) per device for Claude Code"
   },
   "plugins": [
     {
       "name": "usage-tracker",
       "source": "./plugin",
-      "version": "0.4.0",
-      "description": "Claude 5-hour and weekly plan usage for every device you use, synced to your own self-hosted tracker server.",
+      "version": "0.4.1",
+      "description": "Track Claude 5-hour and weekly plan limits per device: per-device usage, caps, and model / effort breakdown for Claude Code, with a web dashboard.",
       "category": "productivity",
-      "homepage": "https://github.com/sherbaev/claude-usage-tracker"
+      "homepage": "https://github.com/sherbaev/claude-usage-tracker",
+      "keywords": [
+        "claude",
+        "claude-code",
+        "claude-code-plugin",
+        "usage-tracker",
+        "usage-limits",
+        "rate-limit",
+        "multi-device",
+        "ccusage",
+        "anthropic",
+        "self-hosted",
+        "dashboard"
+      ],
+      "tags": [
+        "usage",
+        "limits",
+        "multi-device"
+      ]
     }
   ]
 }

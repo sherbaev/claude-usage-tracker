@@ -56,6 +56,10 @@ h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 24px 0 8px; l
 h2 { font-size: 17px; margin: 0 0 6px; }
 h3 { font-size: 14px; margin: 0 0 6px; color: var(--muted); font-weight: 500; }
 .lead { color: var(--muted); max-width: 620px; margin: 0 0 24px; font-size: 16px; }
+.stats {
+  display: inline-block; margin: -8px 0 24px; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums;
+}
 
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);

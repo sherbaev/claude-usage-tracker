@@ -1,12 +1,27 @@
 {
   "name": "usage-tracker",
-  "version": "0.4.0",
-  "description": "Claude 5-hour and weekly plan usage for every device you use, synced to your own self-hosted tracker server. /usage-tracker:status shows all devices with their share of the limit.",
-  "author": { "name": "sherbaev", "url": "https://github.com/sherbaev" },
+  "version": "0.4.1",
+  "description": "Track Claude 5-hour and weekly plan limits per device: per-device usage, caps, and model / effort breakdown for Claude Code, with a web dashboard. /usage-tracker:status shows every device.",
+  "author": {
+    "name": "sherbaev",
+    "url": "https://github.com/sherbaev"
+  },
   "homepage": "https://github.com/sherbaev/claude-usage-tracker",
   "repository": "https://github.com/sherbaev/claude-usage-tracker",
   "license": "MIT",
-  "keywords": ["usage", "limits", "rate-limit", "ccusage", "multi-device", "self-hosted"],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "claude-code-plugin",
+    "usage-tracker",
+    "usage-limits",
+    "rate-limit",
+    "multi-device",
+    "ccusage",
+    "anthropic",
+    "self-hosted",
+    "dashboard"
+  ],
   "userConfig": {
     "server_url": {
       "type": "string",

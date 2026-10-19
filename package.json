@@ -1,7 +1,7 @@
 {
   "name": "claude-usage-tracker",
-  "version": "0.4.0",
-  "description": "Self-hosted multi-device Claude plan usage tracker: Claude Code plugin + server with web dashboard",
+  "version": "0.4.1",
+  "description": "Claude Multi-Device Usage Tracker — track Claude 5-hour and weekly plan limits per device: per-device usage, caps, and model / effort breakdown for Claude Code, with a web dashboard.",
   "type": "module",
   "private": true,
   "bin": {
@@ -17,5 +17,18 @@
     "node": ">=22.13"
   },
   "repository": "https://github.com/sherbaev/claude-usage-tracker",
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "claude-code-plugin",
+    "usage-tracker",
+    "usage-limits",
+    "rate-limit",
+    "multi-device",
+    "ccusage",
+    "anthropic",
+    "self-hosted",
+    "dashboard"
+  ]
 }

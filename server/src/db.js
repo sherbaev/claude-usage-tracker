@@ -54,6 +54,7 @@ export function openDatabase(file) {
     devices: db.prepare('SELECT report FROM devices WHERE user_id = ? ORDER BY name'),
     deviceExists: db.prepare('SELECT 1 FROM devices WHERE user_id = ? AND name = ?'),
     countDevices: db.prepare('SELECT COUNT(*) AS n FROM devices WHERE user_id = ?'),
+    countActive: db.prepare('SELECT COUNT(DISTINCT user_id) AS users, COUNT(*) AS devices FROM devices WHERE reported_at >= ?'),
     upsertDevice: db.prepare(`
       INSERT INTO devices (user_id, name, report, reported_at) VALUES (?, ?, ?, ?)
       ON CONFLICT (user_id, name) DO UPDATE SET report = excluded.report, reported_at = excluded.reported_at`),
@@ -94,6 +95,11 @@ export function openDatabase(file) {
     },
     countDevices(userId) {
       return q.countDevices.get(userId).n;
+    },
+    /** Accounts and devices with a report at or after `since` (ISO). Aggregates only. */
+    countActive(since) {
+      const row = q.countActive.get(since);
+      return { users: row.users, devices: row.devices };
     },
     upsertReport(userId, report) {
       q.upsertDevice.run(userId, report.device, JSON.stringify(report), report.reportedAt);

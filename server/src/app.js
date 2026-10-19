@@ -10,6 +10,8 @@ const MINUTE_MS = 60 * 1000;
 const REGISTER_LIMIT_PER_HOUR = 5;
 const REPORTS_PER_MINUTE = 30;
 const REQUESTS_PER_MINUTE_PER_IP = 300;
+const ACTIVE_WINDOW_DAYS = 7;
+const DAY_MS = 24 * 60 * MINUTE_MS;
 
 const CSP = [
   "default-src 'self'",
@@ -128,6 +130,13 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     return { removed: name };
   }
 
+  /** Public, aggregate only: how many accounts and devices reported recently. */
+  function stats() {
+    const since = new Date(Date.now() - ACTIVE_WINDOW_DAYS * DAY_MS).toISOString();
+    const { users, devices } = db.countActive(since);
+    return { activeUsers: users, activeDevices: devices, windowDays: ACTIVE_WINDOW_DAYS };
+  }
+
   function me(user) {
     const devices = db.listReports(user.id).map((r) => ({ name: r.device, reportedAt: r.reportedAt }));
     return { createdAt: user.createdAt, devices, maxDevices: maxDevicesPerUser };
@@ -141,6 +150,7 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
   const routes = [
     ['GET', /^\/health$/, () => ({ ok: true })],
     ['GET', /^\/api\/config$/, () => ({ registration: registration.mode })],
+    ['GET', /^\/api\/stats$/, () => stats()],
     ['POST', /^\/api\/register$/, (req) => register(req)],
     ['GET', /^\/api\/me$/, (req) => me(authenticate(req))],
     ['DELETE', /^\/api\/me$/, (req) => deleteMe(authenticate(req))],

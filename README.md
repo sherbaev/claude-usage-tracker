@@ -1,7 +1,8 @@
-# Claude Usage Tracker
+# Claude Multi-Device Usage Tracker
 
-See how much of your **Claude 5-hour and weekly plan limits** each of your devices uses — in Claude Code and on a
-web dashboard.
+Track your **Claude 5-hour and weekly plan limits per device**: see how much each laptop, desktop and server uses,
+cap a device's share, and see which model and effort level used it. Works with Claude Code (CLI and IDE panels) and
+a web dashboard. Free, open source, self-hostable.
 
 **→ Use it now: [Open the website](https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io)** — sign up in the browser, no install
 needed.
@@ -133,6 +134,7 @@ All `/api/*` routes except `register` and `config` need `Authorization: Bearer <
 | `GET /api/me` | account + devices |
 | `POST /api/report` | device report |
 | `GET /api/summary` | account windows + per-device share, cap and model breakdown |
+| `GET /api/stats` | public: active accounts and devices (reported in the last 7 days) |
 | `PUT /api/devices/:name/limits` | set caps (% of plan) and whether to block |
 | `DELETE /api/devices/:name` | remove a device |
 | `DELETE /api/me` | delete account |
