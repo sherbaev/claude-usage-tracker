@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Usage Tracker</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/favicon.svg" alt="" width="22" height="22">
+      <span>Claude Usage Tracker</span>
+    </div>
+    <nav id="nav" hidden>
+      <span class="muted" id="refreshed"></span>
+      <button class="ghost" id="signout">Sign out</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Signed out -->
+    <section id="welcome" hidden>
+      <h1>Your Claude plan limits, across every device.</h1>
+      <p class="lead">
+        See how much of your 5-hour and weekly Claude limits each laptop, desktop and server is using.
+        One account token, as many devices as you like.
+      </p>
+      <div class="grid2">
+        <div class="card">
+          <h2>New here</h2>
+          <p class="muted">Create an account and get a token. You'll enter it on each device.</p>
+          <label id="codeRow" hidden>Registration code
+            <input id="code" type="password" autocomplete="off" placeholder="Ask the server owner">
+          </label>
+          <button id="register">Create account</button>
+          <p class="error" id="registerError" hidden></p>
+          <p class="muted" id="registerClosed" hidden>Registration is closed on this server.</p>
+        </div>
+        <div class="card">
+          <h2>Have a token</h2>
+          <p class="muted">Paste the token you got when you registered.</p>
+          <label>Token
+            <input id="tokenInput" type="password" autocomplete="off" placeholder="cut_…" spellcheck="false">
+          </label>
+          <button id="signin">Open dashboard</button>
+          <p class="error" id="signinError" hidden></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Just registered -->
+    <section id="created" hidden>
+      <h1>Account created</h1>
+      <div class="card">
+        <h2>Your token</h2>
+        <p class="warn">This is shown only once. Save it in your password manager — it is the only way into this account.</p>
+        <div class="copyrow">
+          <code id="newToken" class="token"></code>
+          <button class="ghost" data-copy="newToken">Copy</button>
+        </div>
+      </div>
+      <div class="card" id="installCardSlot"></div>
+      <button id="toDashboard">Go to dashboard</button>
+    </section>
+
+    <!-- Signed in -->
+    <section id="dashboard" hidden>
+      <div class="windows" id="windows"></div>
+      <div class="card">
+        <div class="cardhead">
+          <h2>Devices</h2>
+          <span class="muted small">≈ % = account usage × device's share of cost in that window</span>
+        </div>
+        <div id="devices"></div>
+      </div>
+      <details class="card">
+        <summary><h2>Add a device</h2></summary>
+        <div id="installDetailsSlot"></div>
+      </details>
+      <details class="card danger">
+        <summary><h2>Danger zone</h2></summary>
+        <p class="muted">Deletes your account and all device data on this server. Plugins using the token will stop syncing.</p>
+        <button class="destructive" id="deleteAccount">Delete account</button>
+      </details>
+    </section>
+
+    <template id="installTemplate">
+      <h2>Install on each device</h2>
+      <ol class="steps">
+        <li>In Claude Code, install the plugin:
+          <pre><code>/plugin install usage-tracker --marketplace sherbaev/claude-usage-tracker</code></pre>
+        </li>
+        <li>Connect the device — Claude asks for a device name (use a different one per device):
+          <pre><code data-fill="setup"></code></pre>
+        </li>
+        <li>See every device any time, in the terminal or here:
+          <pre><code>/usage-tracker:status</code></pre>
+        </li>
+      </ol>
+      <p class="muted small">Needs Node.js 18+ and <code>ccusage</code> (installed automatically via npx if missing).</p>
+    </template>
+  </main>
+
+  <footer>
+    <a href="https://github.com/sherbaev/claude-usage-tracker" rel="noopener">Open source on GitHub</a>
+    <span class="muted">· Stores only device names, costs, token counts and plan %. Never prompts or code.</span>
+  </footer>
+</body>
+</html>

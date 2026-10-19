@@ -1,0 +1,26 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+      - name: Client runs on Node 20
+        run: npx -y node@20 --test test/client/
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t usage-tracker .
+      - name: Smoke test
+        run: |
+          docker run -d --name t -p 8787:8787 usage-tracker
+          for i in $(seq 1 30); do curl -sf localhost:8787/health && break; sleep 1; done
+          curl -sf -X POST localhost:8787/api/register | grep -q '"token":"cut_'

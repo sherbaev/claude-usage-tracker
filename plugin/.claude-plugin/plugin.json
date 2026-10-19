@@ -1,0 +1,31 @@
+{
+  "name": "usage-tracker",
+  "version": "0.3.0",
+  "description": "Claude 5-hour and weekly plan usage for every device you use, synced to your own self-hosted tracker server. /usage-tracker:status shows all devices with their share of the limit.",
+  "author": { "name": "sherbaev", "url": "https://github.com/sherbaev" },
+  "homepage": "https://github.com/sherbaev/claude-usage-tracker",
+  "repository": "https://github.com/sherbaev/claude-usage-tracker",
+  "license": "MIT",
+  "keywords": ["usage", "limits", "rate-limit", "ccusage", "multi-device", "self-hosted"],
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Tracker server URL",
+      "description": "Your Claude Usage Tracker server, e.g. https://usage.example.com. Open it in a browser and click Create account to get a token.",
+      "default": ""
+    },
+    "token": {
+      "type": "string",
+      "title": "Account token",
+      "description": "The cut_… token from the tracker website. Use the same token on every device so they are grouped under one account.",
+      "sensitive": true,
+      "default": ""
+    },
+    "device_name": {
+      "type": "string",
+      "title": "Device name",
+      "description": "How this device appears on the dashboard (letters, digits, space, _ . -). Empty uses the hostname.",
+      "default": ""
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "usage-tracker-plugin",
+  "private": true,
+  "type": "module"
+}

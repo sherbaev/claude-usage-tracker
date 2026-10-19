@@ -1,0 +1,16 @@
+# Coolify: New Resource → Docker Compose (or use the Dockerfile build pack directly).
+services:
+  tracker:
+    build: .
+    restart: unless-stopped
+    environment:
+      - REGISTRATION=${REGISTRATION:-open}          # open | code | closed
+      - REGISTRATION_CODE=${REGISTRATION_CODE:-}    # required when REGISTRATION=code
+      - MAX_DEVICES_PER_USER=${MAX_DEVICES_PER_USER:-20}
+      - TRUST_PROXY=1
+    volumes:
+      - tracker-data:/data
+    expose:
+      - "8787"
+volumes:
+  tracker-data:

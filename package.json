@@ -1,0 +1,21 @@
+{
+  "name": "claude-usage-tracker",
+  "version": "0.3.0",
+  "description": "Self-hosted multi-device Claude plan usage tracker: Claude Code plugin + server with web dashboard",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "usage-tracker": "plugin/scripts/cli.js",
+    "ccw": "plugin/scripts/cli.js"
+  },
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage 'test/**/*.test.js'",
+    "start": "node --disable-warning=ExperimentalWarning server/src/server.js",
+    "validate": "claude plugin validate . && claude plugin validate ./plugin"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": "https://github.com/sherbaev/claude-usage-tracker",
+  "license": "MIT"
+}

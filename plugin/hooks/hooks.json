@@ -1,0 +1,14 @@
+{
+  "description": "Report this device's Claude plan usage to the tracker server in the background (at most every 5 minutes), and block prompts when the device is over a cap set to \"block\" on the tracker website",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/cli.js\" hook", "async": true }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/cli.js\" hook", "async": true }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/cli.js\" guard", "timeout": 30 }] }
+    ]
+  }
+}
