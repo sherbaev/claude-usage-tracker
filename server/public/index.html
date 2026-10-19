@@ -8,6 +8,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
+  <script src="/telegram.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -84,6 +85,13 @@
           <span class="muted small">Codex, Gemini CLI, OpenCode, … · today and last 7 days, from ccusage</span>
         </div>
         <div id="agents"></div>
+      </div>
+      <div class="card" id="telegramCard">
+        <div class="cardhead">
+          <h2>Telegram</h2>
+          <span class="muted small">Usage per device and near-limit alerts in Telegram</span>
+        </div>
+        <div id="telegram"><p class="muted small">Loading…</p></div>
       </div>
       <details class="card">
         <summary><h2>Add a device</h2></summary>

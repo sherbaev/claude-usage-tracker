@@ -1,4 +1,5 @@
 // Request handling for the tracker server: website, registration, per-user device reports and limits.
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { summarizeAgentReports } from '../../plugin/scripts/agent-rows.js';
 import { computeShares, isValidDeviceName, validateReport } from '../../plugin/scripts/core.js';
@@ -6,11 +7,15 @@ import { applyLimits, deviceStatus, NO_LIMITS, validateLimits } from '../../plug
 import { generateToken, hashToken, isWellFormedToken, safeEqual } from './auth.js';
 import { bearerToken, clientIp, HttpError, readJsonBody, sendFile, sendJson } from './http.js';
 import { createRateLimiter } from './ratelimit.js';
+import { createTelegramApi } from './telegram/api.js';
+import { createSecretBox } from './telegram/secret-box.js';
+import { createTelegramService } from './telegram/service.js';
 
 const MINUTE_MS = 60 * 1000;
 const REGISTER_LIMIT_PER_HOUR = 5;
 const REPORTS_PER_MINUTE = 30;
 const REQUESTS_PER_MINUTE_PER_IP = 300;
+const TELEGRAM_ACTIONS_PER_HOUR = 20;
 const ACTIVE_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
@@ -30,7 +35,17 @@ const STATIC_FILES = {
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
+  '/telegram.js': ['telegram.js', 'text/javascript; charset=utf-8'],
+  '/bot-avatar.jpg': ['bot-avatar.jpg', 'image/jpeg'],
 };
+
+function loadAvatar() {
+  try {
+    return readFileSync(new URL('../public/bot-avatar.jpg', import.meta.url));
+  } catch {
+    return null;
+  }
+}
 
 function loadStatic() {
   const dir = new URL('../public/', import.meta.url);
@@ -73,8 +88,12 @@ async function readValidated(req, validate) {
  * @param {{ db: object, registration: { mode: 'open'|'code'|'closed', code?: string }, proxyHops?: number,
  *           maxDevicesPerUser?: number, maxUsers?: number, log?: (msg: string) => void }} options
  */
-export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser = 20, maxUsers = 10_000, log = () => {} }) {
+/**
+ * @param {{ ..., telegram?: { key?: Buffer, publicUrl?: string, fetch?: typeof fetch, base?: string, avatar?: Buffer } }} options
+ */
+export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser = 20, maxUsers = 10_000, telegram = {}, log = () => {} }) {
   const staticFiles = loadStatic();
+  const telegramLimiter = createRateLimiter({ limit: TELEGRAM_ACTIONS_PER_HOUR, windowMs: 60 * MINUTE_MS });
   const ipLimiter = createRateLimiter({ limit: REQUESTS_PER_MINUTE_PER_IP, windowMs: MINUTE_MS });
   const registerLimiter = createRateLimiter({ limit: REGISTER_LIMIT_PER_HOUR, windowMs: 60 * MINUTE_MS });
   const reportLimiter = createRateLimiter({ limit: REPORTS_PER_MINUTE, windowMs: MINUTE_MS });
@@ -107,6 +126,21 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     return { summary: { ...applyLimits(computeShares(reports), limits), devices, agents }, limits };
   }
 
+  const tg = createTelegramService({
+    db,
+    api: createTelegramApi({ fetch: telegram.fetch, base: telegram.base }),
+    box: createSecretBox(telegram.key ?? randomBytes(32)),
+    avatar: telegram.avatar ?? loadAvatar(),
+    publicUrl: telegram.publicUrl,
+    getSummary: (userId) => limitedSummary({ id: userId }).summary,
+    log,
+  });
+
+  function limitTelegram(user) {
+    if (!telegramLimiter(`u${user.id}`)) throw new HttpError(429, 'too many Telegram actions, try again later');
+    return user;
+  }
+
   async function report(req, user) {
     if (!reportLimiter(`u${user.id}`)) throw new HttpError(429, 'too many reports');
     const clean = await readValidated(req, validateReport);
@@ -115,6 +149,7 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     }
     db.upsertReport(user.id, clean);
     const { summary, limits } = limitedSummary(user);
+    await tg.notify(user, summary).catch((error) => log(`telegram alerts failed: ${error.message}`));
     return { device: clean.device, status: deviceStatus(summary, clean.device, limits[clean.device]) };
   }
 
@@ -144,7 +179,9 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     return { createdAt: user.createdAt, devices, maxDevices: maxDevicesPerUser };
   }
 
-  function deleteMe(user) {
+  async function deleteMe(user) {
+    // Point the bot away from this server before its data goes.
+    if (db.getBot(user.id)) await tg.disconnect(user).catch((error) => log(`telegram disconnect on delete failed: ${error.message}`));
     db.deleteUser(user.id);
     return { deleted: true };
   }
@@ -160,6 +197,15 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     ['GET', /^\/api\/summary$/, (req) => limitedSummary(authenticate(req)).summary],
     ['PUT', /^\/api\/devices\/([^/]+)\/limits$/, (req, m) => setLimits(req, authenticate(req), m[1])],
     ['DELETE', /^\/api\/devices\/([^/]+)$/, (req, m) => removeDevice(authenticate(req), m[1])],
+    ['GET', /^\/api\/telegram$/, (req) => tg.status(authenticate(req))],
+    ['POST', /^\/api\/telegram$/, async (req) => tg.connect(limitTelegram(authenticate(req)), await readJsonBody(req), req.headers.origin)],
+    ['DELETE', /^\/api\/telegram$/, (req) => tg.disconnect(authenticate(req))],
+    ['POST', /^\/api\/telegram\/link$/, (req) => tg.createLink(authenticate(req))],
+    ['PUT', /^\/api\/telegram\/alerts$/, async (req) => tg.setAlerts(authenticate(req), await readJsonBody(req))],
+    ['POST', /^\/api\/telegram\/test$/, (req) => tg.sendTest(limitTelegram(authenticate(req)))],
+    ['DELETE', /^\/api\/telegram\/chats\/(-?\d{1,20})$/, (req, m) => tg.unlinkChat(authenticate(req), m[1])],
+    ['POST', /^\/telegram\/webhook\/([a-f0-9]{32})$/, async (req, m) =>
+      tg.handleWebhook(m[1], req.headers['x-telegram-bot-api-secret-token'], await readJsonBody(req))],
   ];
 
   return async function handle(req, res) {

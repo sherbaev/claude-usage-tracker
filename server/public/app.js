@@ -324,6 +324,7 @@ async function refresh() {
 async function openDashboard() {
   show('dashboard');
   $('installDetailsSlot').replaceChildren(installBlock());
+  loadTelegram();
   await refresh();
   clearInterval(refreshTimer);
   refreshTimer = setInterval(refresh, REFRESH_MS);
@@ -431,4 +432,5 @@ async function init() {
   else show('welcome');
 }
 
-init();
+// After every deferred script (telegram.js) has loaded.
+document.addEventListener('DOMContentLoaded', init);

@@ -76,6 +76,31 @@ Claude plan windows · device: work-macbook
 - **Other coding agents** — Codex, Gemini CLI, OpenCode, Amp, Copilot CLI and more ([full list](#supported-tools)):
   cost and tokens per device for today and the last 7 days, with the models used, plus Codex's own 5-hour and
   weekly plan %.
+- **Telegram bot** — usage per device in Telegram, and alerts when you get near a limit or hit it
+  ([setup](#telegram-bot)).
+
+## Telegram bot
+
+Connect a Telegram bot from the dashboard and get your usage, plus alerts, in Telegram:
+
+1. In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the token it gives you.
+2. On the dashboard, open **Telegram**, paste the token and click **Connect bot**. The server renames the bot to
+   **Claude Usage Tracker**, sets its picture, description and command menu, and connects it to your server.
+3. Click **Link a chat** and open the link on the Telegram account that should get messages. Link as many chats as
+   you like (yourself, a teammate, a group). Each link works once and expires after 10 minutes.
+
+| Command | |
+|---|---|
+| `/usage` | Plan windows (5h / weekly), every device's share and cap, Codex and other agents |
+| `/devices` | Devices and when they last synced |
+| `/alerts` | Your alert settings |
+| `/stop` | Stop messages to this chat |
+
+**Alerts**: choose on the dashboard when to be notified: near the limit (default 80%), limit reached, a device
+near or over its cap, and Codex's own limits. Each alert is sent once per window, when a device reports (about every
+5 minutes while in use).
+
+The bot only answers chats you linked. Bot tokens are stored encrypted on the server.
 
 <details>
 <summary><b>Tracking a machine that doesn't run Claude Code</b></summary>
@@ -156,6 +181,8 @@ port `8787`, a persistent volume at `/data`. Check it with `curl https://your-do
 | `MAX_DEVICES_PER_USER` | `20` | |
 | `MAX_USERS` | `10000` | |
 | `TRUST_PROXY` | `1` in Docker | Number of reverse proxies in front; `0` if exposed directly |
+| `PUBLIC_URL` | dashboard's address | Public `https://` URL Telegram sends bot updates to. Only needed if the dashboard is opened through a different address |
+| `TELEGRAM_SECRET` | key file in `/data` | Encrypts stored Telegram bot tokens. If unset, a random key is created next to the database |
 
 Unused accounts are deleted after 7 days, inactive ones after 180 days; device data is kept 30 days after its last
 report.
@@ -178,6 +205,12 @@ All `/api/*` routes except `register` and `config` need `Authorization: Bearer <
 | `PUT /api/devices/:name/limits` | set caps (% of plan) and whether to block |
 | `DELETE /api/devices/:name` | remove a device |
 | `DELETE /api/me` | delete account |
+| `GET /api/telegram` | Telegram bot, linked chats, alert settings |
+| `POST /api/telegram` `{ token }` | connect and set up a bot |
+| `POST /api/telegram/link` | one-time link to connect a chat |
+| `PUT /api/telegram/alerts` | alert settings |
+| `POST /api/telegram/test` | send a test message |
+| `DELETE /api/telegram`, `DELETE /api/telegram/chats/:id` | disconnect the bot, unlink a chat |
 | `GET /api/config`, `GET /health` | public |
 
 </details>
