@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-tracker",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Claude Multi-Device Usage Tracker — track Claude 5-hour and weekly plan limits per device: per-device usage, caps, and model / effort breakdown for Claude Code, with a web dashboard.",
   "type": "module",
   "private": true,
@@ -32,6 +32,7 @@
     "dashboard",
     "codex",
     "gemini-cli",
-    "opencode"
+    "opencode",
+    "telegram"
   ]
 }

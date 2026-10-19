@@ -25,6 +25,32 @@ const SCHEMA = `
     enforce INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, name)
   );
+  CREATE TABLE IF NOT EXISTS telegram_bots (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    bot_id INTEGER NOT NULL UNIQUE,
+    username TEXT NOT NULL,
+    token_sealed TEXT NOT NULL,
+    webhook_id TEXT NOT NULL UNIQUE,
+    webhook_secret TEXT NOT NULL,
+    link_code TEXT,
+    link_expires_at TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS telegram_chats (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chat_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    linked_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, chat_id)
+  );
+  CREATE TABLE IF NOT EXISTS alert_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    settings TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS alert_state (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    state TEXT NOT NULL
+  );
 `;
 
 // Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS never alters an existing
@@ -37,6 +63,19 @@ function addMissingColumns(db) {
     if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 }
+
+const toBot = (row) =>
+  row && {
+    userId: row.user_id,
+    botId: row.bot_id,
+    username: row.username,
+    tokenSealed: row.token_sealed,
+    webhookId: row.webhook_id,
+    webhookSecret: row.webhook_secret,
+    linkCode: row.link_code,
+    linkExpiresAt: row.link_expires_at,
+    createdAt: row.created_at,
+  };
 
 const toLimits = (row) => ({ fiveHour: row.five_hour, sevenDay: row.seven_day, enforce: row.enforce === 1 });
 
@@ -65,6 +104,31 @@ export function openDatabase(file) {
       ON CONFLICT (user_id, name) DO UPDATE SET
         five_hour = excluded.five_hour, seven_day = excluded.seven_day, enforce = excluded.enforce`),
     deleteLimits: db.prepare('DELETE FROM device_limits WHERE user_id = ? AND name = ?'),
+    botByUser: db.prepare('SELECT * FROM telegram_bots WHERE user_id = ?'),
+    botByWebhook: db.prepare('SELECT * FROM telegram_bots WHERE webhook_id = ?'),
+    botByBotId: db.prepare('SELECT * FROM telegram_bots WHERE bot_id = ?'),
+    upsertBot: db.prepare(`
+      INSERT INTO telegram_bots (user_id, bot_id, username, token_sealed, webhook_id, webhook_secret, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (user_id) DO UPDATE SET bot_id = excluded.bot_id, username = excluded.username,
+        token_sealed = excluded.token_sealed, webhook_id = excluded.webhook_id, webhook_secret = excluded.webhook_secret,
+        link_code = NULL, link_expires_at = NULL, created_at = excluded.created_at`),
+    deleteBot: db.prepare('DELETE FROM telegram_bots WHERE user_id = ?'),
+    setLinkCode: db.prepare('UPDATE telegram_bots SET link_code = ?, link_expires_at = ? WHERE user_id = ?'),
+    chats: db.prepare('SELECT chat_id AS id, name, linked_at AS linkedAt FROM telegram_chats WHERE user_id = ? ORDER BY linked_at'),
+    upsertChat: db.prepare(`
+      INSERT INTO telegram_chats (user_id, chat_id, name, linked_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT (user_id, chat_id) DO UPDATE SET name = excluded.name`),
+    deleteChat: db.prepare('DELETE FROM telegram_chats WHERE user_id = ? AND chat_id = ?'),
+    deleteChats: db.prepare('DELETE FROM telegram_chats WHERE user_id = ?'),
+    alertSettings: db.prepare('SELECT settings FROM alert_settings WHERE user_id = ?'),
+    upsertAlertSettings: db.prepare(`
+      INSERT INTO alert_settings (user_id, settings) VALUES (?, ?)
+      ON CONFLICT (user_id) DO UPDATE SET settings = excluded.settings`),
+    alertState: db.prepare('SELECT state FROM alert_state WHERE user_id = ?'),
+    upsertAlertState: db.prepare(`
+      INSERT INTO alert_state (user_id, state) VALUES (?, ?)
+      ON CONFLICT (user_id) DO UPDATE SET state = excluded.state`),
     pruneDevices: db.prepare('DELETE FROM devices WHERE reported_at < ?'),
     pruneOrphanLimits: db.prepare(`
       DELETE FROM device_limits WHERE NOT EXISTS (
@@ -114,6 +178,50 @@ export function openDatabase(file) {
     },
     setLimits(userId, name, limits) {
       q.upsertLimits.run(userId, name, limits.fiveHour, limits.sevenDay, limits.enforce ? 1 : 0);
+    },
+    // ---- Telegram ----
+    getBot(userId) {
+      return toBot(q.botByUser.get(userId));
+    },
+    getBotByWebhook(webhookId) {
+      return toBot(q.botByWebhook.get(webhookId));
+    },
+    getBotByBotId(botId) {
+      return toBot(q.botByBotId.get(botId));
+    },
+    saveBot(userId, { botId, username, tokenSealed, webhookId, webhookSecret, createdAt }) {
+      q.upsertBot.run(userId, botId, username, tokenSealed, webhookId, webhookSecret, createdAt);
+    },
+    /** Removes the bot and every chat linked through it. */
+    deleteBot(userId) {
+      q.deleteChats.run(userId);
+      q.deleteBot.run(userId);
+    },
+    setLinkCode(userId, code, expiresAt) {
+      q.setLinkCode.run(code, expiresAt, userId);
+    },
+    listChats(userId) {
+      return q.chats.all(userId);
+    },
+    addChat(userId, chatId, name, linkedAt) {
+      q.upsertChat.run(userId, chatId, name, linkedAt);
+    },
+    removeChat(userId, chatId) {
+      return q.deleteChat.run(userId, chatId).changes > 0;
+    },
+    getAlertSettings(userId) {
+      const row = q.alertSettings.get(userId);
+      return row ? JSON.parse(row.settings) : null;
+    },
+    setAlertSettings(userId, settings) {
+      q.upsertAlertSettings.run(userId, JSON.stringify(settings));
+    },
+    getAlertState(userId) {
+      const row = q.alertState.get(userId);
+      return row ? JSON.parse(row.state) : {};
+    },
+    setAlertState(userId, state) {
+      q.upsertAlertState.run(userId, JSON.stringify(state));
     },
     /** Drops stale device reports, their limits, and accounts that were never or long not used. */
     prune({ reportsBefore, unusedUsersBefore, inactiveUsersBefore }) {

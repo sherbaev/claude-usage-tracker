@@ -2,12 +2,15 @@
 //   PORT=8787  DATA_DIR=/data  REGISTRATION=open|code|closed  REGISTRATION_CODE=...
 //   TRUST_PROXY=<number of reverse proxies in front, 1 behind Coolify/Traefik>
 //   MAX_DEVICES_PER_USER=20  MAX_USERS=10000
+//   PUBLIC_URL=https://usage.example.com (optional; else the dashboard's origin is used for Telegram webhooks)
+//   TELEGRAM_SECRET=... (optional; else a key file in DATA_DIR encrypts stored bot tokens)
 import { mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createApp } from './app.js';
 import { openDatabase } from './db.js';
+import { loadSecretKey } from './telegram/secret-box.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REPORT_RETENTION_MS = 30 * DAY_MS;
@@ -50,6 +53,8 @@ export function readSettings(env) {
     proxyHops: proxyHops(env.TRUST_PROXY),
     maxDevicesPerUser: positiveInt(env, 'MAX_DEVICES_PER_USER', 20),
     maxUsers: positiveInt(env, 'MAX_USERS', 10_000),
+    publicUrl: env.PUBLIC_URL || undefined,
+    telegramSecret: env.TELEGRAM_SECRET || undefined,
   };
 }
 
@@ -68,7 +73,8 @@ export async function startServer(settings, log = () => {}) {
   prune();
   const timer = setInterval(prune, PRUNE_INTERVAL_MS).unref();
 
-  const server = Object.assign(createServer(createApp({ ...settings, db, log })), HTTP_LIMITS);
+  const telegram = { key: loadSecretKey({ dataDir: settings.dataDir, secret: settings.telegramSecret }), publicUrl: settings.publicUrl, ...settings.telegram };
+  const server = Object.assign(createServer(createApp({ ...settings, db, log, telegram })), HTTP_LIMITS);
   server.on('clientError', (_error, socket) => {
     if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
   });
