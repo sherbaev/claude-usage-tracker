@@ -4,6 +4,9 @@ import { createHash } from 'node:crypto';
 import { duration, escapeHtml, pct, resetsIn, usd } from './format.js';
 
 const BAR_WIDTH = 10;
+const CAP_BAR_WIDTH = 5;
+const CAP_WARN_RATIO = 0.7;
+const CAP_CRIT_RATIO = 0.9;
 const WARN_PCT = 70;
 const CRIT_PCT = 90;
 const THRESHOLDS = [70, 80, 90];
@@ -62,17 +65,31 @@ function planLines(account, now) {
   return rows.length ? ['📊 <b>Claude plan</b>', ...rows] : [];
 }
 
-function shareText(row, short) {
-  if (!row) return null;
-  if (row.limitPct == null) return `${short} ${pct(row.sharePct)}`;
-  if (row.overLimit) return `${short} ${pct(row.sharePct)} ⛔ over cap ${row.limitPct}%`;
-  return `${short} ${pct(row.sharePct)} / cap ${row.limitPct}%`;
+/** A short bar of how much of its cap a device has used: 🟩 fine, 🟨 getting close, 🟥 at or near the cap. */
+function capBar(share, cap) {
+  const ratio = share / cap;
+  const filled = Math.min(CAP_BAR_WIDTH, Math.round(ratio * CAP_BAR_WIDTH));
+  const block = ratio >= CAP_CRIT_RATIO ? '🟥' : ratio >= CAP_WARN_RATIO ? '🟨' : '🟩';
+  return block.repeat(filled) + '⬜'.repeat(CAP_BAR_WIDTH - filled);
 }
+
+/** One window of one device, e.g. "⏱ 5h  🟩🟩⬜⬜⬜ 9.0% of 50% cap". */
+function deviceWindowLine(row, icon, label) {
+  if (!row) return null;
+  const head = `${INDENT}${icon} ${label}  `;
+  if (row.limitPct == null) return `${head}${pct(row.sharePct)} of plan · no cap`;
+  const bar = capBar(row.sharePct, row.limitPct);
+  if (row.overLimit) return `${head}${bar} ⛔ ${pct(row.sharePct)} — over ${row.limitPct}% cap`;
+  return `${head}${bar} ${pct(row.sharePct)} of ${row.limitPct}% cap`;
+}
+
+const deviceWindowLines = (summary, name) =>
+  PLAN_ROWS.map(([key, icon]) => deviceWindowLine(rowFor(summary, key, name), icon, key === 'fiveHour' ? '5h' : 'Weekly')).filter(Boolean);
 
 function deviceUsageLines(summary, settings) {
   return deviceNames(summary).flatMap((name) => {
-    const parts = [shareText(rowFor(summary, 'fiveHour', name), '5h'), shareText(rowFor(summary, 'sevenDay', name), 'weekly')].filter(Boolean);
-    return [`${bell(settings, name)} <b>${escapeHtml(name)}</b>`, `${INDENT}${parts.join(' · ') || 'no Claude usage in these windows'}`];
+    const windows = deviceWindowLines(summary, name);
+    return [`${bell(settings, name)} <b>${escapeHtml(name)}</b>`, ...(windows.length ? windows : [`${INDENT}💤 no Claude usage in these windows`])];
   });
 }
 
@@ -114,14 +131,11 @@ export function devicesView(summary, settings, now = Date.now()) {
   if (!devices.length) return { text: '💻 No devices yet.\nInstall the plugin on a device first.', reply_markup: inline([back]) };
   const lines = devices.flatMap((d) => {
     const caps = capsText(d.limits);
-    const now5 = shareText(rowFor(summary, 'fiveHour', d.name), '5h');
-    const nowWeek = shareText(rowFor(summary, 'sevenDay', d.name), 'weekly');
-    const usage = [now5, nowWeek].filter(Boolean).map((s) => s.replace(/ \/ cap \d+%| ⛔ over cap \d+%/, ''));
     return [
       '',
       `${bell(settings, d.name)} <b>${escapeHtml(d.name)}</b> · synced ${duration(now - Date.parse(d.reportedAt))} ago`,
       caps ? `${INDENT}🎯 Caps: ${caps}` : `${INDENT}⚠️ No cap set — add one on the dashboard (Devices → Set cap)`,
-      ...(usage.length ? [`${INDENT}📈 Now: ${usage.join(' · ')}`] : []),
+      ...deviceWindowLines(summary, d.name),
     ];
   });
   const text = ['💻 <b>Devices</b>', `Tap a device to turn its alerts ${BELL_ON} on or ${BELL_OFF} off. You're told when it nears or reaches a cap.`, ...lines].join('\n');
