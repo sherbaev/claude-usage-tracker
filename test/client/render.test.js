@@ -76,6 +76,12 @@ test('renderPanel shows how much of a cap is left, and the model · effort break
   assert.doesNotMatch(noModels, /By model/);
 });
 
+test('renderPanel truncates long device names so columns stay aligned', () => {
+  const row = { device: 'Muhammadjons-MacBook-Pro', costUSD: 1, tokens: 1, sharePct: 16.5, reportedAt: '2026-10-19T06:00:00Z', limitPct: null, overLimit: false };
+  const out = renderPanel({ ...data, summary: { windows: { fiveHour: [row], sevenDay: [] } }, serverUrl: 'x' }, { now });
+  assert.match(out, /Muhammadjons-MacBook… ≈ 16\.5%/);
+});
+
 test('renderPanel handles a missing window', () => {
   const out = renderPanel({ ...data, account: { ...data.account, fiveHour: null } }, { now, timeZone: 'UTC' });
   assert.match(out, /5h\s+n\/a/);

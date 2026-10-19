@@ -78,8 +78,10 @@ function capCell(row, c) {
   return `${row.limitPct}% (${left.toFixed(0)} left)`.padEnd(CAP_WIDTH);
 }
 
+// Leaves at least one space before the next column.
+const fitName = (text) => (text.length < DEVICE_WIDTH ? text : `${text.slice(0, DEVICE_WIDTH - 2)}…`).padEnd(DEVICE_WIDTH);
 const deviceName = (device, selfDevice, c) =>
-  device === selfDevice ? c.cyan(`${device} *`.padEnd(DEVICE_WIDTH)) : device.padEnd(DEVICE_WIDTH);
+  device === selfDevice ? c.cyan(fitName(`${device} *`)) : fitName(device);
 const shareText = (pct) => `≈ ${pct.toFixed(1)}%`.padEnd(14);
 
 function deviceLines(summary, selfDevice, now, c) {
