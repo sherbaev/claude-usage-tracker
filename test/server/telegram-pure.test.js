@@ -95,7 +95,11 @@ test('usageView: emoji bars, every device with its alert bell, Refresh button', 
   assert.match(view.text, /Weekly.*🟨.*<b>71%<\/b>/);
   assert.match(view.text, /🔔 <b>Work Mac<\/b>/);
   assert.match(view.text, /🔕 <b>Home &lt;PC&gt;<\/b>/);
-  assert.match(view.text, /weekly 45% \/ cap 50%/);
+  // Each device window: icon, a bar filling toward the device's cap, colored by how close it is.
+  assert.match(view.text, /⏱ 5h\s+🟩🟩🟩⬜⬜ 34% of 50% cap/);
+  assert.match(view.text, /📅 Weekly\s+🟥🟥🟥🟥🟥 45% of 50% cap/);
+  assert.match(view.text, /⏱ 5h\s+2\.0% of plan · no cap/);
+  assert.match(usageView(summary(55, 71), DEFAULT_ALERTS, NOW).text, /⏱ 5h\s+🟥🟥🟥🟥🟥 ⛔ 55% — over 50% cap/);
   assert.deepEqual(view.reply_markup.inline_keyboard.flat().map((b) => b.callback_data), ['u:refresh', 'd:show']);
   assert.match(usageView({ account: null, windows: {}, devices: [], agents: [] }, DEFAULT_ALERTS, NOW).text, /No devices have reported yet/);
 });
