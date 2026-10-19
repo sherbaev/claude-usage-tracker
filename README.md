@@ -1,14 +1,35 @@
 # Claude Multi-Device Usage Tracker
 
-Track your **Claude 5-hour and weekly plan limits per device**: see how much each laptop, desktop and server uses,
-cap a device's share, and see which model and effort level used it. Also tracks **Codex, Gemini CLI, OpenCode, Amp,
-GitHub Copilot CLI** and every other agent [ccusage](https://github.com/ccusage/ccusage) supports. Works with Claude
-Code (CLI and IDE panels) and a web dashboard. Free, open source, self-hostable.
+[![Claude Code](https://img.shields.io/badge/Claude_Code-plan_%25_per_device-D97757)](#supported-tools)
+[![Codex](https://img.shields.io/badge/Codex-plan_%25_+_usage-10A37F)](#supported-tools)
+[![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-usage-4285F4)](#supported-tools)
+[![OpenCode · Amp · Copilot CLI · more](https://img.shields.io/badge/OpenCode_·_Amp_·_Copilot_CLI_·_+12-usage-6E7781)](#supported-tools)
+[![CI](https://github.com/sherbaev/claude-usage-tracker/actions/workflows/test.yml/badge.svg)](https://github.com/sherbaev/claude-usage-tracker/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/sherbaev)
+
+Track **AI coding plan limits on every device you use** — laptop, desktop, build server. See how much of your
+**Claude** 5-hour and weekly limits each device uses, cap a device's share, and see which model and effort level used
+it. **Codex, Gemini CLI, OpenCode, Amp, GitHub Copilot CLI** and every other agent
+[ccusage](https://github.com/ccusage/ccusage) supports are tracked too. Free, open source, self-hostable.
 
 **→ Use it now: [Open the website](https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io)** — sign up in the browser, no install
 needed.
 
 ![Dashboard](docs/dashboard.png)
+
+## Supported tools
+
+| Tool | Plan limit % (5h / weekly) | Usage per device | Models | Per-device caps |
+|---|---|---|---|---|
+| **Claude Code** (CLI, VS Code, JetBrains, Desktop's Code tab) | ✅ account % + each device's share | ✅ exact 5h / weekly windows | ✅ model · effort level | ✅ warn or block |
+| **Codex** (OpenAI) | ✅ account % (from Codex's own records) | ✅ today · last 7 days | ✅ | — |
+| **Gemini CLI** (Google) | — | ✅ today · last 7 days | ✅ | — |
+| **OpenCode**, **Amp**, **GitHub Copilot CLI**, **Droid**, **Qwen Code**, **Kimi**, **Goose**, **Kilo Code**, **Antigravity**, **Grok Build**, **Codebuff**, **Hermes**, **OpenClaw**, **pi**, **ZCode** | — | ✅ today · last 7 days | ✅ | — |
+
+Other tools are read through [ccusage](https://github.com/ccusage/ccusage), so anything it detects on a device shows
+up automatically — nothing to configure. Only Claude and Codex publish plan-limit percentages; for the rest you see
+cost and tokens.
 
 ## Quick start
 
@@ -52,9 +73,9 @@ Claude plan windows · device: work-macbook
 - **Model · effort breakdown** — which model and effort level used each device's share.
 - **Per-device caps** — on the website, set a cap per device to get a warning, or block Claude Code on that device
   until the window resets.
-- **Other coding agents** — Codex, Gemini CLI, OpenCode, Amp, Copilot CLI, Droid, Qwen, Kimi, … (whatever ccusage
-  detects): cost and tokens per device for today and the last 7 days, with the models used. For **Codex** you also
-  get its own 5-hour and weekly plan % (read from Codex's session files).
+- **Other coding agents** — Codex, Gemini CLI, OpenCode, Amp, Copilot CLI and more ([full list](#supported-tools)):
+  cost and tokens per device for today and the last 7 days, with the models used, plus Codex's own 5-hour and
+  weekly plan %.
 
 <details>
 <summary><b>Tracking a machine that doesn't run Claude Code</b></summary>
@@ -171,6 +192,14 @@ npm run validate    # validate the Claude Code plugin
 
 > The usage endpoint is the one Claude Code itself uses. It is not a documented public API and may change. This
 > project is not affiliated with Anthropic.
+
+## Support the project
+
+If this saves you from hitting your limits, you can support development:
+
+[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-support-FFDD00?logo=buymeacoffee&logoColor=black&style=for-the-badge)](https://buymeacoffee.com/sherbaev)
+
+Stars, issues and pull requests help too.
 
 ## License
 
