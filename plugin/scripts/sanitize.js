@@ -1,6 +1,7 @@
 // Server responses end up in the terminal and in Claude's context (slash command output), so treat
 // them as untrusted: keep only known fields with valid values, strip control characters, truncate text.
 import { WINDOWS, isValidDeviceName } from './core.js';
+import { AGENT_RE } from './agent-rows.js';
 import { MAX_MODEL_ROWS } from './model-rows.js';
 
 const MAX_TEXT = 200;
@@ -49,6 +50,44 @@ function cleanAccountWindow(win) {
   return pct !== null && resetsAt ? { pct, resetsAt } : null;
 }
 
+const cleanTotals = (t) => {
+  const costUSD = finite(t?.costUSD);
+  const tokens = finite(t?.tokens);
+  return costUSD === null || tokens === null ? null : { costUSD, tokens };
+};
+
+// Agent model rows have no plan share: label, cost and tokens only.
+function cleanAgentModelRow(row) {
+  const costUSD = finite(row?.costUSD);
+  const tokens = finite(row?.tokens);
+  if (typeof row?.label !== 'string' || costUSD === null || tokens === null) return null;
+  return { label: cleanText(row.label, MAX_LABEL), costUSD, tokens };
+}
+
+const cleanAgentModelRows = (rows) => (Array.isArray(rows) ? rows.slice(0, MAX_MODEL_ROWS_SHOWN).map(cleanAgentModelRow).filter(Boolean) : []);
+
+function cleanAgentDevice(d) {
+  const reportedAt = isoOrNull(d?.reportedAt);
+  const week = cleanTotals(d?.week);
+  if (!isValidDeviceName(d?.device) || !reportedAt || !week) return null;
+  return { device: d.device, reportedAt, today: cleanTotals(d.today) ?? { costUSD: 0, tokens: 0 }, week, models: cleanAgentModelRows(d.models) };
+}
+
+function cleanAgentSummary(agent) {
+  if (typeof agent?.id !== 'string' || !AGENT_RE.test(agent.id)) return null;
+  const plan = agent.plan ? { fiveHour: cleanAccountWindow(agent.plan.fiveHour), sevenDay: cleanAccountWindow(agent.plan.sevenDay) } : null;
+  return {
+    id: agent.id,
+    label: cleanText(agent.label ?? agent.id, MAX_LABEL),
+    plan: plan && (plan.fiveHour || plan.sevenDay) ? plan : null,
+    planObservedAt: isoOrNull(agent.planObservedAt),
+    devices: Array.isArray(agent.devices) ? agent.devices.map(cleanAgentDevice).filter(Boolean) : [],
+  };
+}
+
+const MAX_AGENTS_SHOWN = 24;
+const cleanAgentList = (agents) => (Array.isArray(agents) ? agents.slice(0, MAX_AGENTS_SHOWN).map(cleanAgentSummary).filter(Boolean) : []);
+
 const cleanLimits = (limits) => ({
   fiveHour: finite(limits?.fiveHour),
   sevenDay: finite(limits?.sevenDay),
@@ -66,7 +105,7 @@ export function sanitizeSummary(data) {
     ...d,
     limits: cleanLimits(data.devices.find((raw) => raw?.name === d.name)?.limits),
   }));
-  return { account, windows, devices };
+  return { account, windows, devices, agents: cleanAgentList(data?.agents) };
 }
 
 /** Device list from GET /api/me: valid names with a valid timestamp only. */

@@ -1,8 +1,9 @@
 # Claude Multi-Device Usage Tracker
 
 Track your **Claude 5-hour and weekly plan limits per device**: see how much each laptop, desktop and server uses,
-cap a device's share, and see which model and effort level used it. Works with Claude Code (CLI and IDE panels) and
-a web dashboard. Free, open source, self-hostable.
+cap a device's share, and see which model and effort level used it. Also tracks **Codex, Gemini CLI, OpenCode, Amp,
+GitHub Copilot CLI** and every other agent [ccusage](https://github.com/ccusage/ccusage) supports. Works with Claude
+Code (CLI and IDE panels) and a web dashboard. Free, open source, self-hostable.
 
 **→ Use it now: [Open the website](https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io)** — sign up in the browser, no install
 needed.
@@ -51,11 +52,29 @@ Claude plan windows · device: work-macbook
 - **Model · effort breakdown** — which model and effort level used each device's share.
 - **Per-device caps** — on the website, set a cap per device to get a warning, or block Claude Code on that device
   until the window resets.
+- **Other coding agents** — Codex, Gemini CLI, OpenCode, Amp, Copilot CLI, Droid, Qwen, Kimi, … (whatever ccusage
+  detects): cost and tokens per device for today and the last 7 days, with the models used. For **Codex** you also
+  get its own 5-hour and weekly plan % (read from Codex's session files).
+
+<details>
+<summary><b>Tracking a machine that doesn't run Claude Code</b></summary>
+
+Devices report from Claude Code's hooks. On a machine that only uses Codex or another agent, report on a schedule
+instead (Node.js 18.17+; no Claude login needed):
+
+```sh
+git clone https://github.com/sherbaev/claude-usage-tracker ~/.usage-tracker
+node ~/.usage-tracker/plugin/scripts/cli.js setup --server <server-url> --token <your_token> --device "Build Server"
+# crontab -e
+*/10 * * * * node ~/.usage-tracker/plugin/scripts/cli.js push
+```
+
+</details>
 
 ## Privacy
 
-- Only usage numbers are sent: device name, %, cost and token counts. **Never** prompts, code, file paths or your
-  Claude login.
+- Only usage numbers are sent: device name, %, cost and token counts, model names and effort levels. **Never** prompts,
+  code, file paths or your Claude / Codex login.
 - Your Claude login stays on your device and is only used with `api.anthropic.com`.
 - The server stores a hash of your token, not the token. Delete your account and all its data from the website
   anytime.

@@ -5,7 +5,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { parseAccountUsage } from './core.js';
-import { unitPrices } from './models.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -16,6 +15,7 @@ const HTTP_TIMEOUT_MS = 8000;
 // Weekly window is 7 days; look back 8 so timezone-based date filtering never cuts it.
 const LOOKBACK_DAYS = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
+export const NO_CLAUDE_LOGIN = 'NO_CLAUDE_LOGIN';
 
 function extractAccessToken(raw, origin) {
   let parsed;
@@ -53,7 +53,8 @@ export async function getAccessToken() {
     return extractAccessToken(await readFile(file, 'utf8'), file);
   } catch (error) {
     if (error.code === 'ENOENT') {
-      throw new Error('Claude Code credentials not found — log in with `claude` (subscription login) first');
+      const notLoggedIn = new Error('Claude Code credentials not found — log in with `claude` (subscription login) first');
+      throw Object.assign(notLoggedIn, { code: NO_CLAUDE_LOGIN });
     }
     throw error;
   }
@@ -91,13 +92,13 @@ async function runCcusage(args) {
   throw new Error(`Failed to run ccusage (install it: npm i -g ccusage) — ${failures.join('; ')}`);
 }
 
-/** $ per weighted token for each model, derived from ccusage's per-model daily costs. */
-export async function fetchModelPrices({ now = new Date() } = {}) {
+/** Daily usage of every agent ccusage detects (Claude, Codex, Gemini CLI, …), split per agent and model. */
+export async function fetchAgentDaily({ now = new Date() } = {}) {
   const since = yyyymmdd(new Date(now.getTime() - LOOKBACK_DAYS * DAY_MS));
-  const stdout = await runCcusage(['claude', 'daily', '--breakdown', '--json', '--since', since]);
+  const stdout = await runCcusage(['daily', '--by-agent', '--json', '--since', since]);
   const daily = JSON.parse(stdout)?.daily;
   if (!Array.isArray(daily)) throw new Error('Unexpected ccusage daily JSON (no "daily" array)');
-  return unitPrices(daily);
+  return daily;
 }
 
 /** Hour-granular local usage blocks from ccusage (priced by ccusage itself). */

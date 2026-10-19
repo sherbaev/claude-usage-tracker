@@ -91,6 +91,20 @@ test('computeShares excludes devices reporting a previous window', () => {
   assert.equal(result.windows.sevenDay.length, 2);
 });
 
+test('computeShares takes each window from the freshest report that has Claude data', () => {
+  const codexOnly = { device: 'codex-box', reportedAt: '2026-10-19T07:00:00Z', account: { fiveHour: null, sevenDay: null }, local: { fiveHour: null, sevenDay: null } };
+  const result = computeShares([report('mac', '2026-10-19T06:00:00Z', 3, 30, 8), codexOnly]);
+  assert.equal(result.account.fiveHour.pct, 8);
+  assert.deepEqual(result.windows.fiveHour.map((r) => r.device), ['mac']);
+  assert.deepEqual(computeShares([codexOnly]), { account: { fiveHour: null, sevenDay: null }, windows: { fiveHour: [], sevenDay: [] } });
+});
+
+test('validateReport keeps cleaned agent usage', () => {
+  const body = { ...report('mac', '2026-10-19T06:00:00Z', 1, 2), agents: { codex: { today: { costUSD: 1, tokens: 1 }, week: { costUSD: 2, tokens: 2 }, models: [] }, claude: {} } };
+  assert.deepEqual(Object.keys(validateReport(body).agents), ['codex']);
+  assert.deepEqual(validateReport(report('mac', '2026-10-19T06:00:00Z', 1, 2)).agents, {});
+});
+
 test('computeShares handles empty input and zero cost', () => {
   assert.deepEqual(computeShares([]), { account: null, windows: {} });
   const zero = computeShares([report('mac', '2026-10-19T06:00:00Z', 0, 0)]);

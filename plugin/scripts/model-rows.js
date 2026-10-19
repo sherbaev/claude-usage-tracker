@@ -5,7 +5,7 @@ export const MAX_MODEL_ROWS = 8;
 export const OTHER_MODEL = 'other';
 // The top rows plus one folded "other" row.
 const MAX_ROWS_ACCEPTED = MAX_MODEL_ROWS + 1;
-const MODEL_RE = /^[A-Za-z0-9][\w.:-]{0,63}$/;
+const MODEL_RE = /^[A-Za-z0-9][\w.:/-]{0,63}$/;
 const TAG_RE = /^[a-z]{1,16}$/;
 const MAX_COST_USD = 1e7;
 const MAX_TOKENS = 1e13;

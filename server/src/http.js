@@ -1,5 +1,5 @@
 // Small HTTP helpers: errors, JSON bodies, responses, client IP.
-const MAX_BODY_BYTES = 16 * 1024;
+const MAX_BODY_BYTES = 32 * 1024;
 
 const BASE_HEADERS = Object.freeze({
   'X-Content-Type-Options': 'nosniff',

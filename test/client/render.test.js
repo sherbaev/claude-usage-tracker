@@ -82,6 +82,30 @@ test('renderPanel truncates long device names so columns stay aligned', () => {
   assert.match(out, /Muhammadjons-MacBook… ≈ 16\.5%/);
 });
 
+test('renderPanel lists other coding agents with plan % when known', () => {
+  const summary = {
+    windows: { fiveHour: [], sevenDay: [] },
+    agents: [
+      {
+        id: 'codex',
+        label: 'Codex',
+        plan: { fiveHour: { pct: 23, resetsAt: '2026-10-19T08:00:00Z' }, sevenDay: { pct: 8, resetsAt: '2026-10-22T00:00:00Z' } },
+        devices: [
+          { device: 'mac', reportedAt: '2026-10-19T06:00:00Z', today: { costUSD: 1.5, tokens: 2_000_000 }, week: { costUSD: 9, tokens: 12_000_000 }, models: [{ label: 'gpt-5.5-codex', costUSD: 9, tokens: 1 }] },
+        ],
+      },
+      { id: 'gemini', label: 'Gemini CLI', plan: null, devices: [{ device: 'pc', reportedAt: '2026-10-19T05:00:00Z', today: { costUSD: 0, tokens: 0 }, week: { costUSD: 0.4, tokens: 900 }, models: [] }] },
+    ],
+  };
+  const out = renderPanel({ ...data, summary, serverUrl: 'x' }, { now, timeZone: 'UTC' });
+  assert.match(out, /Other coding agents/);
+  assert.match(out, /Codex\s+plan: 5h 23% · weekly 8%/);
+  assert.match(out, /mac \*\s+\$1\.50 · 2\.0M\s+\$9\.00 · 12\.0M\s+gpt-5\.5-codex/);
+  assert.match(out, /Gemini CLI/);
+  assert.match(out, /pc\s+\$0\.00 · 0\s+\$0\.40 · 900/);
+  assert.doesNotMatch(renderPanel({ ...data, summary: { windows: {} }, serverUrl: 'x' }, { now }), /Other coding agents/);
+});
+
 test('renderPanel handles a missing window', () => {
   const out = renderPanel({ ...data, account: { ...data.account, fiveHour: null } }, { now, timeZone: 'UTC' });
   assert.match(out, /5h\s+n\/a/);

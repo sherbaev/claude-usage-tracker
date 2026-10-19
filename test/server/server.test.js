@@ -178,6 +178,38 @@ test('public stats count accounts and devices that reported in the last 7 days',
   assert.deepEqual((await call('GET', '/api/stats')).json.data, { activeUsers: 2, activeDevices: 3, windowDays: 7 });
 });
 
+test('other agents: per-device usage and the freshest Codex plan show up in the summary', async () => {
+  const { call, register } = await boot();
+  const token = await register();
+  const resets = new Date(Date.now() + 3600_000).toISOString();
+  const codex = (cost, pct, observedAt) => ({
+    today: { costUSD: cost, tokens: 10 },
+    week: { costUSD: cost * 2, tokens: 20 },
+    models: [{ model: 'gpt-5.5-codex', costUSD: cost * 2, tokens: 20 }],
+    plan: { fiveHour: { pct, resetsAt: resets }, sevenDay: null },
+    planObservedAt: observedAt,
+  });
+  const mac = { ...report('mac', 2), agents: { codex: codex(1, 20, new Date(Date.now() - 60_000).toISOString()) } };
+  // A device with only Codex (no Claude login) still reports.
+  const box = {
+    device: 'codex-box',
+    reportedAt: new Date().toISOString(),
+    account: { fiveHour: null, sevenDay: null },
+    local: { fiveHour: null, sevenDay: null },
+    agents: { codex: codex(3, 35, new Date().toISOString()), gemini: { today: { costUSD: 0, tokens: 5 }, week: { costUSD: 0.5, tokens: 50 }, models: [] } },
+  };
+  assert.equal((await call('POST', '/api/report', { token, body: mac })).status, 200);
+  assert.equal((await call('POST', '/api/report', { token, body: box })).status, 200);
+
+  const summary = (await call('GET', '/api/summary', { token })).json.data;
+  assert.equal(summary.account.fiveHour.pct, 20, 'Claude windows still come from the device that has Claude data');
+  assert.deepEqual(summary.agents.map((a) => [a.id, a.label]), [['codex', 'Codex'], ['gemini', 'Gemini CLI']]);
+  const codexSummary = summary.agents[0];
+  assert.equal(codexSummary.plan.fiveHour.pct, 35);
+  assert.deepEqual(codexSummary.devices.map((d) => [d.device, d.week.costUSD]), [['codex-box', 6], ['mac', 2]]);
+  assert.equal(codexSummary.devices[0].models[0].label, 'gpt-5.5-codex');
+});
+
 test('rejects missing, malformed and unknown tokens', async () => {
   const { call } = await boot();
   assert.equal((await call('GET', '/api/summary')).status, 401);
@@ -193,7 +225,7 @@ test('validates reports and body size', async () => {
   const bad = await call('POST', '/api/report', { token, body: { ...report('x', 1), device: '../etc' } });
   assert.equal(bad.status, 400);
   assert.match(bad.json.error, /device/);
-  const big = await call('POST', '/api/report', { token, raw: JSON.stringify({ pad: 'x'.repeat(20_000) }) }).catch(() => null);
+  const big = await call('POST', '/api/report', { token, raw: JSON.stringify({ pad: 'x'.repeat(40_000) }) }).catch(() => null);
   assert.ok(big === null || big.status === 413);
 });
 

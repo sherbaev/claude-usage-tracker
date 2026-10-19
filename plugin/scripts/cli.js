@@ -22,15 +22,20 @@ import {
   updateState,
 } from './config.js';
 import { activeViolations, deviceStatus, NO_LIMITS } from './limits.js';
-import { attachModels, summarizeModels } from './models.js';
+import { attachCodexPlan, claudeDaily, summarizeAgents } from './agents.js';
+import { readCodexSnapshot } from './codex.js';
+import { attachModels, summarizeModels, unitPrices } from './models.js';
 import { renderPanel } from './render.js';
-import { fetchAccountUsage, fetchLocalBlocks, fetchModelPrices, getAccessToken } from './sources.js';
+import { fetchAccountUsage, fetchAgentDaily, fetchLocalBlocks, getAccessToken, NO_CLAUDE_LOGIN } from './sources.js';
 import { fetchMe, fetchSummary, pushReport, registerAccount } from './sync.js';
 import { readUsageEntries } from './transcripts.js';
 
 const HOOK_THROTTLE_SEC = 300;
+const DAY_MS = 24 * 60 * 60 * 1000;
 // Covers the weekly window (7 days) whatever its reset time.
-const BREAKDOWN_LOOKBACK_MS = 8 * 24 * 60 * 60 * 1000;
+const BREAKDOWN_LOOKBACK_MS = 8 * DAY_MS;
+const AGENT_WEEK_DAYS = 7;
+const NO_ACCOUNT = Object.freeze({ fiveHour: null, sevenDay: null });
 // A blocked device sends no Stop hooks, so the guard re-checks a stale verdict with the server
 // itself; raising the cap on the website then unblocks within this many seconds.
 const GUARD_REFRESH_SEC = 60;
@@ -54,24 +59,48 @@ async function fetchAccountWithFallback() {
   }
 }
 
-/** Transcript entries + per-model prices for the model · effort breakdown, or null if unavailable. */
-async function collectModelUsage() {
+/** Extra detail (model breakdown, other agents): report without it rather than not at all. */
+async function optional(what, load) {
   try {
-    const sinceMs = Date.now() - BREAKDOWN_LOOKBACK_MS;
-    const [entries, prices] = await Promise.all([readUsageEntries({ sinceMs }), fetchModelPrices()]);
-    return { entries, prices };
+    return await load();
   } catch (error) {
-    // The breakdown is extra detail: report the plan usage without it rather than not at all.
-    process.stderr.write(`usage-tracker: model breakdown unavailable — ${error.message}\n`);
+    process.stderr.write(`usage-tracker: ${what} unavailable — ${error.message}\n`);
     return null;
   }
 }
 
+/** Claude plan windows, or empty windows on a device that only uses other agents. */
+async function fetchClaudeAccount() {
+  try {
+    return await fetchAccountWithFallback();
+  } catch (error) {
+    if (error.code === NO_CLAUDE_LOGIN) return NO_ACCOUNT;
+    throw error;
+  }
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+// ccusage groups days in the system time zone.
+const localDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const agentDays = (now) => ({ today: localDate(now), weekStart: localDate(new Date(now.getTime() - (AGENT_WEEK_DAYS - 1) * DAY_MS)) });
+
 async function collectReport(device) {
-  const [account, blocks, modelUsage] = await Promise.all([fetchAccountWithFallback(), fetchLocalBlocks(), collectModelUsage()]);
-  const totals = localWindowTotals(blocks, account);
-  const models = modelUsage ? summarizeModels(modelUsage.entries, modelUsage.prices, account) : {};
-  return { device, reportedAt: new Date().toISOString(), account, local: attachModels(totals, models) };
+  const now = new Date();
+  const sinceMs = now.getTime() - BREAKDOWN_LOOKBACK_MS;
+  const [account, blocksOrError, daily, entries, codexSnapshot] = await Promise.all([
+    fetchClaudeAccount(),
+    fetchLocalBlocks().catch((error) => error),
+    optional('per-agent usage', () => fetchAgentDaily({ now })),
+    optional('model breakdown', () => readUsageEntries({ sinceMs })),
+    optional('Codex plan usage', () => readCodexSnapshot({ sinceMs })),
+  ]);
+  // Without a Claude login there is no Claude data, and ccusage's Claude commands fail: skip them.
+  if (blocksOrError instanceof Error && account !== NO_ACCOUNT) throw blocksOrError;
+  const blocks = account === NO_ACCOUNT || blocksOrError instanceof Error ? [] : blocksOrError;
+  const prices = unitPrices(claudeDaily(daily));
+  const models = entries && daily ? summarizeModels(entries, prices, account) : {};
+  const agents = attachCodexPlan(daily ? summarizeAgents(daily, agentDays(now)) : {}, codexSnapshot);
+  return { device, reportedAt: now.toISOString(), account, local: attachModels(localWindowTotals(blocks, account), models), agents };
 }
 
 async function sendReport(config, report) {

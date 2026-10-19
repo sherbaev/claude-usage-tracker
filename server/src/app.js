@@ -1,5 +1,6 @@
 // Request handling for the tracker server: website, registration, per-user device reports and limits.
 import { readFileSync } from 'node:fs';
+import { summarizeAgentReports } from '../../plugin/scripts/agent-rows.js';
 import { computeShares, isValidDeviceName, validateReport } from '../../plugin/scripts/core.js';
 import { applyLimits, deviceStatus, NO_LIMITS, validateLimits } from '../../plugin/scripts/limits.js';
 import { generateToken, hashToken, isWellFormedToken, safeEqual } from './auth.js';
@@ -102,7 +103,8 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     const reports = db.listReports(user.id);
     const limits = db.listLimits(user.id);
     const devices = reports.map((r) => ({ name: r.device, reportedAt: r.reportedAt, limits: limits[r.device] ?? NO_LIMITS }));
-    return { summary: { ...applyLimits(computeShares(reports), limits), devices }, limits };
+    const agents = summarizeAgentReports(reports);
+    return { summary: { ...applyLimits(computeShares(reports), limits), devices, agents }, limits };
   }
 
   async function report(req, user) {
