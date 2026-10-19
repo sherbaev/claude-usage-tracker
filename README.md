@@ -1,200 +1,155 @@
 # Claude Usage Tracker
 
-See how much of your **Claude 5-hour and weekly plan limits** each of your devices is using — laptop, desktop,
-build server — from the terminal (`/usage-tracker:status` in Claude Code) or a web dashboard on your own server.
+See how much of your **Claude 5-hour and weekly plan limits** each of your devices uses — in Claude Code and on a
+web dashboard.
+
+**→ Use it now: [Open the website](https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io)** — sign up in the browser, no install
+needed.
 
 ![Dashboard](docs/dashboard.png)
 
-```text
-/usage-tracker:status
+## Quick start
 
+1. **Create an account** on the [website](https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io) and copy your
+   token.
+2. **Install the plugin** in Claude Code on each device:
+
+   ```text
+   /plugin install usage-tracker --marketplace sherbaev/claude-usage-tracker
+   ```
+
+3. **Connect the device** — the website's **Add a device** section builds this command for you:
+
+   ```text
+   /usage-tracker:setup https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io <your_token> Work MacBook
+   ```
+
+Use the **same token on every device** and give each device its own name. That's it — devices report
+automatically while you use Claude Code.
+
+Needs Claude Code logged in with a Claude subscription (Pro / Max / Team, not an API key) and Node.js 18.17+.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/usage-tracker:status` | Account 5h / weekly %, reset times, each device's share and cap |
+| `/usage-tracker:setup [url] [token] [name]` | Connect this device |
+
+```text
 Claude plan windows · device: work-macbook
   Window  Account (all devices)        Resets                This device
   5h      ███████░░░░░░░░░░░░░  34%    in 2h 26m (14:00)     $9.20 · 17.5M tok
   Weekly  ██████████████░░░░░░  71%    in 2d 10h (Wed 22:00) $410.00 · 1.07B tok
-
-Per device · https://usage.example.com · % split by cost share
-  Window  Device                ≈ % of limit  Cap            Cost       Tokens    Synced
-  5h      work-macbook *        ≈ 23.9%       —              $9.20      17.5M     just now
-          home-desktop          ≈ 8.0%        5% OVER        $3.10      5.9M      7m ago
-          build-server          ≈ 2.3%        —              $0.90      1.7M      40m ago
-  Weekly  work-macbook *        ≈ 38.4%       50% (12 left)  $410.00    1.07B     just now
-          ...
-
-By model · effort · each device % split by cost
-  Window  Device                Model · effort              ≈ % of limit  Cost       Tokens
-  5h      work-macbook *        Opus 5.5 · high             ≈ 20.1%       $7.74      14.2M
-                                Sonnet 5.5 · medium         ≈ 3.8%        $1.46      3.3M
-          ...
 ```
 
-It has two parts, both in this repo:
+## What you get
 
-| Part | What it does |
-|---|---|
-| **Claude Code plugin** (`plugin/`) | Reads your plan usage and this device's local usage, reports it to your server in the background, and adds `/usage-tracker:status` and `/usage-tracker:setup`. |
-| **Server + website** (`server/`) | Self-hosted (Docker / Coolify). People register on the website and get **one token**. Every device that uses that token is grouped under that one account. |
+- **Account usage** — the same 5h / weekly % and reset times as `/usage` in Claude Code, for your whole account.
+- **Per-device share** — an estimate of how much of that each device used, split by cost.
+- **Model · effort breakdown** — which model and effort level used each device's share.
+- **Per-device caps** — on the website, set a cap per device to get a warning, or block Claude Code on that device
+  until the window resets.
 
-## How it works
+## Privacy
 
-| Number | Source |
-|---|---|
-| Account % and reset time | `GET https://api.anthropic.com/api/oauth/usage` with Claude Code's own OAuth login — the same data as `/usage` in Claude Code. It covers the whole account: every device, plus claude.ai chat. |
-| This device's cost and tokens | [`ccusage`](https://github.com/ccusage/ccusage) `claude blocks --session-length 1`, summed over Anthropic's exact window (`resets_at − 5h` / `− 7d`). |
-| Per-device ≈ % | `account % × device cost ÷ total cost of all devices` in the same window. **This is an estimate**: Anthropic only publishes one number per account, and chat usage on claude.ai gets spread across your devices. |
-| Model · effort breakdown | Each assistant message's model, effort level (`low` … `max`) and speed (`fast`) from Claude Code's local transcripts (`~/.claude/projects/**/*.jsonl` — metadata only, never content), priced with a per-model rate from `ccusage claude daily --breakdown`. A device's ≈ % is split across these rows by cost. |
+- Only usage numbers are sent: device name, %, cost and token counts. **Never** prompts, code, file paths or your
+  Claude login.
+- Your Claude login stays on your device and is only used with `api.anthropic.com`.
+- The server stores a hash of your token, not the token. Delete your account and all its data from the website
+  anytime.
 
-Devices report automatically: the plugin's `SessionStart` and `Stop` hooks push in the background, at most once
-every 5 minutes. A device only appears once it has run Claude Code with the plugin installed.
+<details>
+<summary><b>Other ways to install the plugin</b></summary>
 
-**One token = one Claude account.** Put devices that log into the same Claude subscription under the same token.
-
-## Per-device caps
-
-On the website, click **Set cap** next to a device to limit how much of your plan it may use. A cap is a share of
-your whole plan limit. Example: your account is at 64% of the weekly limit and `home-desktop` has a weekly cap of
-50%. If it has used ≈ 14%, the dashboard shows `≈ 14% of plan · cap 50% · 36% left`. It is blocked or warned only
-when its own share reaches 50%, whatever the other devices use.
-
-Click **Models** next to a device to see which model and effort level used its share, e.g.
-`Opus 5.5 · high ≈ 12%`, `Sonnet 5.5 · medium ≈ 2%`.
-
-- **Warn only** — the dashboard and `/usage-tracker:status` mark the device `OVER`.
-- **Block Claude Code on this device** — the plugin's `UserPromptSubmit` hook refuses new prompts on that device
-  while it is over its cap, explaining why and when the window resets. Raising or removing the cap on the website
-  unblocks it within a minute, and blocking ends automatically when the window resets.
-
-Caps are checked against the device's estimated share (above). A device starts being blocked at its next report
-after going over: reports happen at most every 5 minutes while you use Claude Code. Checks run against locally
-cached data, so they add no network delay to normal prompts. If the server can't be reached, the last known
-verdict stays in effect until the window resets.
-
-## Install the plugin (each device)
-
-Requirements: Claude Code logged in with a Claude subscription (Pro/Max/Team — not an API key), and Node.js 18.17+.
-`ccusage` is used if it's installed (`npm i -g ccusage`); otherwise it runs through `npx ccusage@20`.
-
-```text
-/plugin install usage-tracker --marketplace sherbaev/claude-usage-tracker
-```
-
-or, on older Claude Code:
+On older Claude Code:
 
 ```text
 /plugin marketplace add sherbaev/claude-usage-tracker
 /plugin install usage-tracker@claude-usage-tracker
 ```
 
-In the VS Code or JetBrains panel, where `/plugin` isn't available, install from a terminal and restart the panel:
+In the VS Code or JetBrains panel, install from a terminal and restart the panel:
 
 ```sh
 claude plugin marketplace add sherbaev/claude-usage-tracker
 claude plugin install usage-tracker@claude-usage-tracker
 ```
 
-Then connect the device to your server. The last part is the device name, and it may contain spaces:
+You can also set `server_url`, `token` and `device_name` under `/plugin` → *usage-tracker* → *Configure options*;
+the token is then kept in your system's secure credential store.
 
-```text
-/usage-tracker:setup https://usage.example.com cut_your_token Work MacBook
-```
+</details>
 
-**Give each device a different name** (`Work MacBook`, `Home Windows`, …), using letters, digits, spaces and `_ . -`.
-The website's **Add a device** section builds this command for you. If you leave the name out, Claude asks for it. You can
-instead fill in the plugin options under `/plugin` → *usage-tracker* → *Configure options* (`server_url`, `token`,
-`device_name`). Those take precedence, and the token is kept in your system's secure credential store.
+<details>
+<summary><b>How the numbers are calculated</b></summary>
 
-To get a token, open your server URL in a browser and click **Create account**, or let `/usage-tracker:setup`
-register for you. Use the **same token on every device**.
-
-| Command | |
+| Number | Source |
 |---|---|
-| `/usage-tracker:status` | Account 5h/weekly %, reset times, every device's share and cap |
-| `/usage-tracker:setup [url] [token] [name]` | Connect this device |
+| Account % and reset time | Claude Code's own usage endpoint (`/api/oauth/usage`) — covers every device plus claude.ai chat |
+| This device's cost and tokens | [`ccusage`](https://github.com/ccusage/ccusage), summed over Anthropic's exact window |
+| Per-device ≈ % | `account % × device cost ÷ total cost of all devices` — an **estimate**, since Anthropic reports one number per account |
+| Model · effort | Model and effort level from Claude Code's local transcripts (metadata only, never content) |
 
-### Optional: `ccusage claude daily` in your shell
+Devices report from the plugin's hooks, at most every 5 minutes. A blocked device is unblocked within a minute after
+you raise or remove its cap, and automatically when the window resets.
+
+</details>
+
+<details>
+<summary><b>Host your own server</b></summary>
+
+The website and API are in `server/` and run in Docker (no npm dependencies, Node 22.13+).
 
 ```sh
-git clone https://github.com/sherbaev/claude-usage-tracker && cd claude-usage-tracker && npm link   # adds `ccw`
+docker build -t usage-tracker . && docker run -p 8787:8787 -v usage-data:/data usage-tracker
 ```
 
-```zsh
-# ~/.zshrc — print the window panel after `ccusage claude daily`
-ccusage() {
-  command ccusage "$@" || return $?
-  if [[ "$1" == claude && "$2" == daily && " ${*} " != *" --json "* && " ${*} " != *" -j "* ]]; then
-    ccw || true
-  fi
-}
-```
+On **Coolify**: New Resource → Public Repository → this repo, build pack **Dockerfile** (or **Docker Compose**),
+port `8787`, a persistent volume at `/data`. Check it with `curl https://your-domain/health`.
 
-## Deploy the server (Coolify)
+| Variable | Default | |
+|---|---|---|
+| `REGISTRATION` | `open` | `open`, `code` (needs `REGISTRATION_CODE`) or `closed` |
+| `REGISTRATION_CODE` | — | Invite code (8+ characters) when `REGISTRATION=code` |
+| `MAX_DEVICES_PER_USER` | `20` | |
+| `MAX_USERS` | `10000` | |
+| `TRUST_PROXY` | `1` in Docker | Number of reverse proxies in front; `0` if exposed directly |
 
-1. Coolify → **New Resource** → **Public Repository** → `https://github.com/sherbaev/claude-usage-tracker`
-   (or your fork). Build pack: **Dockerfile**. Or choose **Docker Compose** and use `docker-compose.yml`.
-2. **Port**: `8787`. **Domain**: e.g. `https://usage.example.com`. Coolify's proxy handles TLS.
-3. **Persistent storage**: mount a volume at `/data`. It holds the SQLite database (the compose file already does this).
-4. Optional environment variables:
+Unused accounts are deleted after 7 days, inactive ones after 180 days; device data is kept 30 days after its last
+report.
 
-   | Variable | Default | |
-   |---|---|---|
-   | `REGISTRATION` | `open` | `open` = anyone can create an account (rate-limited to 5/hour per IP), `code` = needs `REGISTRATION_CODE`, `closed` = no new accounts |
-   | `REGISTRATION_CODE` | — | Invite code (8+ chars) when `REGISTRATION=code` |
-   | `MAX_DEVICES_PER_USER` | `20` | |
-   | `MAX_USERS` | `10000` | Registration stops at this many accounts |
-   | `TRUST_PROXY` | `1` in Docker | Number of reverse proxies in front (Coolify/Traefik = 1; add 1 for Cloudflare). Used to read the real client IP for rate limiting. Set `0` if the container is exposed directly. |
+</details>
 
-5. Check it: `curl https://usage.example.com/health`
+<details>
+<summary><b>API</b></summary>
 
-Plain Docker: `docker build -t usage-tracker . && docker run -p 8787:8787 -v usage-data:/data usage-tracker`
-
-### What the server stores
-
-- **Accounts**: a SHA-256 hash of the token. The token itself is never stored, so a lost token cannot be recovered.
-  Accounts whose devices never report are deleted after 7 days, and accounts inactive for 180 days are deleted too.
-- **Devices**: device name, the account's 5h/weekly %, reset times, this device's cost and token counts (in total
-  and per model · effort level · speed), and its caps. Kept for 30 days after the device last reports.
-
-It never receives prompts, code, file paths or your Claude credentials — the OAuth token stays on your device and
-is only sent to `api.anthropic.com`. Users can delete their account, which removes all its data, from the website.
-
-### Security notes
-
-- The plugin only talks to `https://` servers (plain `http://` is allowed for `localhost` only) and never follows redirects with your token.
-- Everything the server sends back is validated and stripped of control characters before it is printed or shown
-  to Claude, so a hostile server cannot inject terminal escape codes or instructions.
-- The server rate-limits by IP and by account, caps request size and slow connections, and stores no plaintext tokens.
-
-### API
-
-All `/api/*` routes except `register` and `config` need `Authorization: Bearer <token>`. Every response is `{ success, data, error }`.
+All `/api/*` routes except `register` and `config` need `Authorization: Bearer <token>`. Responses are
+`{ success, data, error }`.
 
 | Route | |
 |---|---|
-| `POST /api/register` `{ code? }` | → `{ token }` (201) |
-| `GET /api/me` | account + device list |
-| `POST /api/report` | device report (16 KB max, 30/min per account) |
-| `GET /api/summary` | account windows + per-device `sharePct`, `limitPct`, `overLimit`, `models` (`label`, `sharePct`, `costUSD`, `tokens`) |
-| `PUT /api/devices/:name/limits` `{ fiveHour, sevenDay, enforce }` | caps in % of plan (1–100 or `null`); `enforce` = block |
-| `DELETE /api/devices/:name` | remove a device (and its caps) |
+| `POST /api/register` | → `{ token }` |
+| `GET /api/me` | account + devices |
+| `POST /api/report` | device report |
+| `GET /api/summary` | account windows + per-device share, cap and model breakdown |
+| `PUT /api/devices/:name/limits` | set caps (% of plan) and whether to block |
+| `DELETE /api/devices/:name` | remove a device |
 | `DELETE /api/me` | delete account |
 | `GET /api/config`, `GET /health` | public |
 
+</details>
+
 ## Development
 
-No npm dependencies. The server needs Node 22.13+ (`node:sqlite`); the plugin runs on Node 18.17+.
-
 ```sh
-npm test            # node:test + coverage
-npm start           # server on :8787, data in ./data
-npm run validate    # claude plugin validate (marketplace + plugin)
-node plugin/scripts/cli.js status --no-sync   # try the client locally
+npm test            # tests + coverage
+npm start           # server on :8787
+npm run validate    # validate the Claude Code plugin
 ```
 
-Layout: `plugin/` (Claude Code plugin: commands, hooks, scripts), `server/src` (HTTP API, SQLite),
-`server/public` (website), `test/`.
-
-> The usage endpoint (`/api/oauth/usage`) is the one Claude Code itself uses. It is not a documented public API and
-> may change. This project is not affiliated with Anthropic.
+> The usage endpoint is the one Claude Code itself uses. It is not a documented public API and may change. This
+> project is not affiliated with Anthropic.
 
 ## License
 
