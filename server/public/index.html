@@ -92,21 +92,34 @@
       <ol class="steps">
         <li>In Claude Code, install the plugin:
           <pre><code>/plugin install usage-tracker --marketplace sherbaev/claude-usage-tracker</code></pre>
+          <p class="muted small">Using the VS Code / JetBrains panel, where <code>/plugin</code> isn't available? Run this in a terminal
+            instead, then restart the panel. The plugin then works in the panel too:</p>
+          <pre><code>claude plugin marketplace add sherbaev/claude-usage-tracker
+claude plugin install usage-tracker@claude-usage-tracker</code></pre>
         </li>
-        <li>Connect the device — Claude asks for a device name (use a different one per device):
-          <pre><code data-fill="setup"></code></pre>
+        <li>Name the device. Every device needs its own name, e.g. <em>Work MacBook</em> or <em>Home Windows</em>:
+          <label class="devicefield">Device name
+            <input data-role="device-name" type="text" maxlength="64" autocomplete="off" spellcheck="false" placeholder="e.g. Work MacBook">
+          </label>
+          <p class="warn small" data-role="device-hint" hidden></p>
+          Then connect it by running this in Claude Code on that device:
+          <div class="copyrow">
+            <pre class="grow"><code data-fill="setup"></code></pre>
+            <button class="ghost small" data-copy-code>Copy</button>
+          </div>
+          <p class="muted small">Letters, digits, spaces and <code>_ . -</code> only (no apostrophes).</p>
         </li>
         <li>See every device any time, in the terminal or here:
           <pre><code>/usage-tracker:status</code></pre>
         </li>
       </ol>
-      <p class="muted small">Needs Node.js 18+ and <code>ccusage</code> (installed automatically via npx if missing).</p>
+      <p class="muted small">Needs Node.js 18.17+ and <code>ccusage</code> (installed automatically via npx if missing).</p>
     </template>
   </main>
 
   <footer>
     <a href="https://github.com/sherbaev/claude-usage-tracker" rel="noopener">Open source on GitHub</a>
-    <span class="muted">· Stores only device names, costs, token counts and plan %. Never prompts or code.</span>
+    <span class="muted">· Stores only device names, costs, token counts, model names, effort levels and plan %. Never prompts or code.</span>
   </footer>
 </body>
 </html>

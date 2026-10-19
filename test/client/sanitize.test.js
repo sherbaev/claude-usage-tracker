@@ -23,7 +23,7 @@ test('sanitizeSummary drops rows with hostile names or bad numbers', () => {
   };
   const clean = sanitizeSummary(hostile);
   assert.deepEqual(clean.windows.fiveHour, [
-    { device: 'mac', reportedAt: '2026-10-19T06:00:00.000Z', sharePct: 10, costUSD: 1, tokens: 2, limitPct: 20, overLimit: true },
+    { device: 'mac', reportedAt: '2026-10-19T06:00:00.000Z', sharePct: 10, costUSD: 1, tokens: 2, limitPct: 20, overLimit: true, models: [] },
   ]);
   assert.deepEqual(clean.windows.sevenDay, []);
   assert.equal('injected' in clean.windows, false);
@@ -33,6 +33,21 @@ test('sanitizeSummary drops rows with hostile names or bad numbers', () => {
     devices: [{ name: 'mac', reportedAt: '2026-10-19T06:00:00Z', limits: { fiveHour: 10, sevenDay: 'x', enforce: 1 } }],
   });
   assert.deepEqual(withDevices.devices[0].limits, { fiveHour: 10, sevenDay: null, enforce: false });
+});
+
+test('sanitizeSummary keeps model rows with clean labels and finite numbers only', () => {
+  const row = { device: 'mac', sharePct: 10, costUSD: 1, tokens: 2, reportedAt: '2026-10-19T06:00:00Z' };
+  const models = [
+    { label: 'Opus 5.5 · high', sharePct: 8, costUSD: 0.8, tokens: 1, model: 'claude-opus-5-5' },
+    { label: '\x1b[31mred\nline', sharePct: 2, costUSD: 0.2, tokens: 1 },
+    { label: 'bad', sharePct: 'x', costUSD: 1, tokens: 1 },
+  ];
+  const clean = sanitizeSummary({ windows: { fiveHour: [{ ...row, models }, { ...row, device: 'b', models: 'nope' }] } });
+  assert.deepEqual(clean.windows.fiveHour[0].models, [
+    { label: 'Opus 5.5 · high', sharePct: 8, costUSD: 0.8, tokens: 1 },
+    { label: ' [31mred line', sharePct: 2, costUSD: 0.2, tokens: 1 },
+  ]);
+  assert.deepEqual(clean.windows.fiveHour[1].models, []);
 });
 
 test('sanitizeDeviceList and sanitizeStatus keep only valid fields', () => {

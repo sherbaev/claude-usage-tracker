@@ -78,10 +78,31 @@ function meter(pct, extraClass = '') {
 }
 
 // ---------- install instructions ----------
+// Same rule as the plugin and server (plugin/scripts/core.js).
+const DEVICE_NAME_RE = /^[\w.\- ]{1,64}$/;
+
+function deviceNameHint(name) {
+  if (name && !DEVICE_NAME_RE.test(name)) return 'Use only letters, digits, spaces and _ . - (max 64 characters).';
+  if (lastSummary?.devices.some((d) => d.name === name)) {
+    return `"${name}" is already on this account. A new device needs a different name, or it overwrites that device's data.`;
+  }
+  return '';
+}
+
 function installBlock() {
   const node = $('installTemplate').content.cloneNode(true);
-  node.querySelector('[data-fill="setup"]').textContent =
-    `/usage-tracker:setup ${location.origin} ${token ?? '<your token>'}`;
+  const input = node.querySelector('[data-role="device-name"]');
+  const hint = node.querySelector('[data-role="device-hint"]');
+  const command = node.querySelector('[data-fill="setup"]');
+  const update = () => {
+    const name = input.value.trim();
+    hint.textContent = deviceNameHint(name);
+    hint.hidden = !hint.textContent;
+    const shownName = name && DEVICE_NAME_RE.test(name) ? name : '<device name>';
+    command.textContent = `/usage-tracker:setup ${location.origin} ${token ?? '<your token>'} ${shownName}`;
+  };
+  input.addEventListener('input', update);
+  update();
   return node;
 }
 
@@ -119,16 +140,45 @@ function capMeter(row) {
   return bar;
 }
 
+/** "cap 50% · 36% left" / "cap 50% · over by 4%"; empty without a cap. */
+function capText(row) {
+  if (row.limitPct == null) return '';
+  const left = row.limitPct - row.sharePct;
+  return `cap ${row.limitPct}% · ${left > 0 ? `${fmtPct(left)} left` : `over by ${fmtPct(-left)}`}`;
+}
+
 function shareCell(row, limits, key) {
   if (!row) return el('td', { className: 'muted', textContent: limits[key] != null ? `— · cap ${limits[key]}%` : '—' });
-  const capText = row.limitPct != null ? ` of ${row.limitPct}% cap` : '';
   const badge = row.overLimit ? [el('span', { className: 'badge', textContent: limits.enforce ? 'Blocked' : 'Over cap' })] : [];
   return el('td', {}, [
     el('div', { className: 'share' }, [
-      el('div', {}, [el('strong', { textContent: `≈ ${fmtPct(row.sharePct)}` }), el('span', { className: 'muted small', textContent: capText }), ...badge]),
+      el('div', {}, [el('strong', { textContent: `≈ ${fmtPct(row.sharePct)}` }), el('span', { className: 'muted small', textContent: ' of plan' }), ...badge]),
       capMeter(row),
+      el('span', { className: `small capline ${row.overLimit ? 'warn' : 'muted'}`, textContent: capText(row), hidden: row.limitPct == null }),
     ]),
     el('div', { className: 'muted small', textContent: `${fmtUsd(row.costUSD)} · ${fmtTokens(row.tokens)} tok` }),
+  ]);
+}
+
+// ---------- per-device model · effort breakdown ----------
+const expandedDevices = new Set();
+
+function modelList(row) {
+  if (!row?.models?.length) {
+    return el('p', { className: 'muted small', textContent: row ? 'No breakdown yet — update the plugin on this device.' : 'No usage in this window.' });
+  }
+  return el('ul', { className: 'models' }, row.models.map((m) => el('li', {}, [
+    el('span', { className: 'mlabel', textContent: m.label }),
+    el('span', { className: 'mpct', textContent: `≈ ${fmtPct(m.sharePct)}` }),
+    el('span', { className: 'mmeta muted small', textContent: `${fmtUsd(m.costUSD)} · ${fmtTokens(m.tokens)} tok` }),
+  ])));
+}
+
+function modelsRow(rowsByWindow) {
+  return el('tr', { className: 'details' }, [
+    el('td', { className: 'muted small', textContent: 'By model · effort (≈ % of plan)' }),
+    ...Object.keys(WINDOW_LABELS).map((key) => el('td', {}, [modelList(rowsByWindow[key])])),
+    el('td'),
   ]);
 }
 
@@ -167,31 +217,42 @@ function capEditor(device) {
     refresh();
   });
   const help = el('p', { className: 'muted small', textContent:
-    'A cap is the share of your whole plan limit this device may use in that window. "Block" stops new Claude Code prompts on the device until the window resets or you raise the cap.' });
+    'A cap is the share of your whole plan limit this device may use in that window. Example: weekly cap 50 — this ' +
+    'device may use up to half of your weekly limit; at 14% used it has 36% left, whatever the other devices use. ' +
+    '"Block" stops new Claude Code prompts on the device until the window resets or you raise the cap.' });
   return el('tr', { className: 'editor' }, [
     el('td', { colSpan: 4 }, [el('div', { className: 'capform' }, [five.node, week.node, el('label', { className: 'inline' }, ['When over', mode]), save, cancel]), error, help]),
   ]);
 }
 
 function deviceRows(device, rowsByWindow) {
-  const capButton = el('button', { className: 'ghost small', textContent: 'Cap', title: `Set usage cap for ${device.name}` });
+  const hasCap = [device.limits.fiveHour, device.limits.sevenDay].some((v) => v != null);
+  const isExpanded = expandedDevices.has(device.name);
+  const modelsButton = el('button', {
+    className: 'ghost small', textContent: isExpanded ? 'Hide models' : 'Models', title: `Model and effort breakdown for ${device.name}`,
+  });
+  modelsButton.addEventListener('click', () => {
+    if (isExpanded) expandedDevices.delete(device.name);
+    else expandedDevices.add(device.name);
+    renderDevices(lastSummary, { force: true });
+  });
+  const capButton = el('button', { className: 'ghost small', textContent: hasCap ? 'Edit cap' : 'Set cap', title: `Usage cap for ${device.name}` });
   capButton.addEventListener('click', () => {
     editingDevice = editingDevice === device.name ? null : device.name;
     renderDevices(lastSummary, { force: true });
   });
   const remove = el('button', { className: 'ghost small', textContent: 'Remove', title: `Remove ${device.name}` });
   remove.addEventListener('click', () => removeDevice(device.name));
-  const capSummary = [device.limits.fiveHour, device.limits.sevenDay].some((v) => v != null)
-    ? `${device.limits.enforce ? 'blocks' : 'warns'} at cap` : '';
+  const capSummary = hasCap ? `${device.limits.enforce ? 'blocks' : 'warns'} at cap` : '';
   const row = el('tr', {}, [
     el('td', {}, [
       el('div', { className: 'devname', textContent: device.name }),
       el('div', { className: 'muted small', textContent: [`synced ${fmtAgo(device.reportedAt)}`, capSummary].filter(Boolean).join(' · ') }),
     ]),
     ...Object.keys(WINDOW_LABELS).map((key) => shareCell(rowsByWindow[key], device.limits, key)),
-    el('td', { className: 'right actions' }, [capButton, remove]),
+    el('td', { className: 'right actions' }, [modelsButton, capButton, remove]),
   ]);
-  return editingDevice === device.name ? [row, capEditor(device)] : [row];
+  return [row, ...(isExpanded ? [modelsRow(rowsByWindow)] : []), ...(editingDevice === device.name ? [capEditor(device)] : [])];
 }
 
 let lastSummary = null;
@@ -291,9 +352,10 @@ async function onDeleteAccount() {
 }
 
 document.addEventListener('click', async (event) => {
-  const target = event.target.closest('[data-copy]');
+  const target = event.target.closest('[data-copy], [data-copy-code]');
   if (!target) return;
-  await navigator.clipboard.writeText($(target.dataset.copy).textContent).catch(() => {});
+  const source = target.dataset.copy ? $(target.dataset.copy) : target.closest('.copyrow').querySelector('code');
+  await navigator.clipboard.writeText(source.textContent).catch(() => {});
   target.textContent = 'Copied';
   setTimeout(() => { target.textContent = 'Copy'; }, 1500);
 });

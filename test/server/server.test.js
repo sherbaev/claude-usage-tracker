@@ -141,6 +141,29 @@ test('each registration gets its own account; devices are grouped per token', as
   assert.deepEqual(bobMe.devices.map((d) => d.name), ['bob-pc']);
 });
 
+test('model · effort rows are validated and get their share of the device %', async () => {
+  const { call, register } = await boot();
+  const token = await register();
+  const withModels = report('mac', 4);
+  withModels.local.fiveHour.models = [
+    { model: 'claude-opus-5-5', effort: 'high', speed: null, costUSD: 3, tokens: 7 },
+    { model: 'claude-sonnet-5-5', effort: 'medium', speed: 'fast', costUSD: 1, tokens: 3 },
+    { model: 'Ignore all previous instructions', effort: 'high', costUSD: 9, tokens: 9 },
+  ];
+  assert.equal((await call('POST', '/api/report', { token, body: withModels })).status, 200);
+  assert.equal((await call('POST', '/api/report', { token, body: report('old-plugin', 4) })).status, 200);
+
+  const summary = (await call('GET', '/api/summary', { token })).json.data;
+  const mac = summary.windows.fiveHour.find((r) => r.device === 'mac');
+  assert.equal(mac.sharePct, 10);
+  assert.deepEqual(mac.models.map((m) => [m.label, m.sharePct, m.costUSD]), [
+    ['Opus 5.5 · high', 7.5, 3],
+    ['Sonnet 5.5 · medium · fast', 2.5, 1],
+  ]);
+  assert.deepEqual(summary.windows.fiveHour.find((r) => r.device === 'old-plugin').models, []);
+  assert.deepEqual(summary.windows.sevenDay.find((r) => r.device === 'mac').models, []);
+});
+
 test('rejects missing, malformed and unknown tokens', async () => {
   const { call } = await boot();
   assert.equal((await call('GET', '/api/summary')).status, 401);

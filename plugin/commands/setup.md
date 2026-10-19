@@ -9,7 +9,7 @@ Arguments from the user: $ARGUMENTS
 
 Connect this device to the user's tracker account so it reports its Claude plan usage.
 
-1. You need three values: server URL (must be `https://`), account token (`cut_` followed by 43 letters, digits, `-` or `_`), and device name. Take whichever are in the arguments.
+1. You need three values: server URL (must be `https://`), account token (`cut_` followed by 43 letters, digits, `-` or `_`), and device name. Take whichever are in the arguments, in that order: the device name is everything after the token and may contain spaces (e.g. `https://usage.example.com cut_… Work MacBook` → device `Work MacBook`; drop surrounding quotes).
    - Missing server URL: ask for it (the URL of their self-hosted usage tracker server).
    - Missing token: ask for it. If they don't have one, explain that each person registers once on the server website (open the server URL, click "Create account") and uses the same token on every device. Offer to register for them instead by running `node "${CLAUDE_PLUGIN_ROOT}/scripts/cli.js" register --server '<url>'`, which prints a new token — tell them to save it in a password manager.
    - Missing device name: ask, suggesting the current config's `device` value (the hostname). Allowed: letters, digits, space, `_ . -`, max 64 chars. Every device on the account needs a different name.

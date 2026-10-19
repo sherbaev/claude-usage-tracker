@@ -22,11 +22,15 @@ import {
   updateState,
 } from './config.js';
 import { activeViolations, deviceStatus, NO_LIMITS } from './limits.js';
+import { attachModels, summarizeModels } from './models.js';
 import { renderPanel } from './render.js';
-import { fetchAccountUsage, fetchLocalBlocks, getAccessToken } from './sources.js';
+import { fetchAccountUsage, fetchLocalBlocks, fetchModelPrices, getAccessToken } from './sources.js';
 import { fetchMe, fetchSummary, pushReport, registerAccount } from './sync.js';
+import { readUsageEntries } from './transcripts.js';
 
 const HOOK_THROTTLE_SEC = 300;
+// Covers the weekly window (7 days) whatever its reset time.
+const BREAKDOWN_LOOKBACK_MS = 8 * 24 * 60 * 60 * 1000;
 // A blocked device sends no Stop hooks, so the guard re-checks a stale verdict with the server
 // itself; raising the cap on the website then unblocks within this many seconds.
 const GUARD_REFRESH_SEC = 60;
@@ -50,9 +54,24 @@ async function fetchAccountWithFallback() {
   }
 }
 
+/** Transcript entries + per-model prices for the model · effort breakdown, or null if unavailable. */
+async function collectModelUsage() {
+  try {
+    const sinceMs = Date.now() - BREAKDOWN_LOOKBACK_MS;
+    const [entries, prices] = await Promise.all([readUsageEntries({ sinceMs }), fetchModelPrices()]);
+    return { entries, prices };
+  } catch (error) {
+    // The breakdown is extra detail: report the plan usage without it rather than not at all.
+    process.stderr.write(`usage-tracker: model breakdown unavailable — ${error.message}\n`);
+    return null;
+  }
+}
+
 async function collectReport(device) {
-  const [account, blocks] = await Promise.all([fetchAccountWithFallback(), fetchLocalBlocks()]);
-  return { device, reportedAt: new Date().toISOString(), account, local: localWindowTotals(blocks, account) };
+  const [account, blocks, modelUsage] = await Promise.all([fetchAccountWithFallback(), fetchLocalBlocks(), collectModelUsage()]);
+  const totals = localWindowTotals(blocks, account);
+  const models = modelUsage ? summarizeModels(modelUsage.entries, modelUsage.prices, account) : {};
+  return { device, reportedAt: new Date().toISOString(), account, local: attachModels(totals, models) };
 }
 
 async function sendReport(config, report) {

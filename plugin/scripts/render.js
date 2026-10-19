@@ -67,22 +67,48 @@ function accountLines({ account, local }, now, c, timeZone) {
   return [c.dim(header), ...rows];
 }
 
+const CAP_WIDTH = 15;
+const DEVICE_WIDTH = 22;
+const MODEL_WIDTH = 28;
+
 function capCell(row, c) {
-  if (row.limitPct == null) return c.dim('—'.padEnd(10));
-  const text = `${row.limitPct}%${row.overLimit ? ' OVER' : ''}`.padEnd(10);
-  return row.overLimit ? c.red(text) : text;
+  if (row.limitPct == null) return c.dim('—'.padEnd(CAP_WIDTH));
+  if (row.overLimit) return c.red(`${row.limitPct}% OVER`.padEnd(CAP_WIDTH));
+  const left = Math.max(0, row.limitPct - row.sharePct);
+  return `${row.limitPct}% (${left.toFixed(0)} left)`.padEnd(CAP_WIDTH);
 }
 
+const deviceName = (device, selfDevice, c) =>
+  device === selfDevice ? c.cyan(`${device} *`.padEnd(DEVICE_WIDTH)) : device.padEnd(DEVICE_WIDTH);
+const shareText = (pct) => `≈ ${pct.toFixed(1)}%`.padEnd(14);
+
 function deviceLines(summary, selfDevice, now, c) {
-  const header = `  ${'Window'.padEnd(8)}${'Device'.padEnd(22)}${'≈ % of limit'.padEnd(14)}${'Cap'.padEnd(10)}${'Cost'.padEnd(11)}${'Tokens'.padEnd(10)}Synced`;
+  const header = `  ${'Window'.padEnd(8)}${'Device'.padEnd(DEVICE_WIDTH)}${'≈ % of limit'.padEnd(14)}${'Cap'.padEnd(CAP_WIDTH)}${'Cost'.padEnd(11)}${'Tokens'.padEnd(10)}Synced`;
   const rows = Object.entries(WINDOWS).flatMap(([key, { label }]) =>
     (summary.windows[key] ?? []).map((row, i) => {
-      const name = row.device === selfDevice ? c.cyan(`${row.device} *`.padEnd(22)) : row.device.padEnd(22);
-      const share = `≈ ${row.sharePct.toFixed(1)}%`.padEnd(14);
-      return `  ${(i === 0 ? label : '').padEnd(8)}${name}${c.bold(share)}${capCell(row, c)}${usd(row.costUSD).padEnd(11)}${formatTokens(row.tokens).padEnd(10)}${c.dim(formatAgo(row.reportedAt, now))}`;
+      const window = (i === 0 ? label : '').padEnd(8);
+      return `  ${window}${deviceName(row.device, selfDevice, c)}${c.bold(shareText(row.sharePct))}${capCell(row, c)}${usd(row.costUSD).padEnd(11)}${formatTokens(row.tokens).padEnd(10)}${c.dim(formatAgo(row.reportedAt, now))}`;
     }),
   );
   return [c.dim(header), ...rows];
+}
+
+/** Model · effort rows under each device, per window. Empty when no device reported a breakdown. */
+function modelLines(summary, selfDevice, c) {
+  const rows = Object.entries(WINDOWS).flatMap(([key, { label }]) =>
+    (summary.windows[key] ?? [])
+      .filter((row) => row.models?.length)
+      .flatMap((row, deviceIndex) =>
+        row.models.map((m, i) => {
+          const window = (deviceIndex === 0 && i === 0 ? label : '').padEnd(8);
+          const name = i === 0 ? deviceName(row.device, selfDevice, c) : ''.padEnd(DEVICE_WIDTH);
+          return `  ${window}${name}${m.label.padEnd(MODEL_WIDTH)}${c.bold(shareText(m.sharePct))}${usd(m.costUSD).padEnd(11)}${formatTokens(m.tokens)}`;
+        }),
+      ),
+  );
+  if (!rows.length) return [];
+  const header = `  ${'Window'.padEnd(8)}${'Device'.padEnd(DEVICE_WIDTH)}${'Model · effort'.padEnd(MODEL_WIDTH)}${'≈ % of limit'.padEnd(14)}${'Cost'.padEnd(11)}Tokens`;
+  return ['', `${c.bold('By model · effort')} ${c.dim('· each device % split by cost')}`, c.dim(header), ...rows];
 }
 
 /**
@@ -97,7 +123,7 @@ export function renderPanel(data, { now = new Date(), color = false, timeZone } 
   ];
   if (data.summary) {
     lines.push('', `${c.bold('Per device')} ${c.dim(`· ${data.serverUrl} · % split by cost share`)}`);
-    lines.push(...deviceLines(data.summary, data.device, now, c));
+    lines.push(...deviceLines(data.summary, data.device, now, c), ...modelLines(data.summary, data.device, c));
   } else if (data.syncError) {
     lines.push('', c.yellow(`  sync: ${data.syncError}`));
   } else {

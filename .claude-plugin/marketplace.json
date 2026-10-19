@@ -9,7 +9,7 @@
     {
       "name": "usage-tracker",
       "source": "./plugin",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "description": "Claude 5-hour and weekly plan usage for every device you use, synced to your own self-hosted tracker server.",
       "category": "productivity",
       "homepage": "https://github.com/sherbaev/claude-usage-tracker"

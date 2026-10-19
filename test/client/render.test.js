@@ -51,6 +51,31 @@ test('renderPanel shows per-device split and sync errors', () => {
   assert.match(err, /\x1b\[/);
 });
 
+test('renderPanel shows how much of a cap is left, and the model · effort breakdown', () => {
+  const models = [
+    { label: 'Opus 5.5 · high', sharePct: 12, costUSD: 30, tokens: 4_000_000 },
+    { label: 'Sonnet 5.5 · medium', sharePct: 2, costUSD: 5, tokens: 900_000 },
+  ];
+  const summary = {
+    windows: {
+      fiveHour: [],
+      sevenDay: [
+        { device: 'mac', costUSD: 35, tokens: 4_900_000, sharePct: 14, reportedAt: '2026-10-19T06:00:00Z', limitPct: 50, overLimit: false, models },
+        { device: 'linux', costUSD: 1, tokens: 5, sharePct: 1, reportedAt: '2026-10-19T06:00:00Z', limitPct: null, overLimit: false, models: [] },
+      ],
+    },
+  };
+  const out = renderPanel({ ...data, summary, serverUrl: 'https://usage.example.com' }, { now, timeZone: 'UTC' });
+  assert.match(out, /Weekly\s+mac \*\s+≈ 14\.0%\s+50% \(36 left\)\s+\$35\.00/);
+  assert.match(out, /By model · effort/);
+  assert.match(out, /Weekly\s+mac \*\s+Opus 5\.5 · high\s+≈ 12\.0%\s+\$30\.00\s+4\.0M/);
+  assert.match(out, /\n\s+Sonnet 5\.5 · medium\s+≈ 2\.0%\s+\$5\.00/);
+  assert.doesNotMatch(out, /linux\s+Opus/);
+
+  const noModels = renderPanel({ ...data, summary: { windows: { fiveHour: [], sevenDay: [summary.windows.sevenDay[1]] } }, serverUrl: 'x' }, { now });
+  assert.doesNotMatch(noModels, /By model/);
+});
+
 test('renderPanel handles a missing window', () => {
   const out = renderPanel({ ...data, account: { ...data.account, fiveHour: null } }, { now, timeZone: 'UTC' });
   assert.match(out, /5h\s+n\/a/);

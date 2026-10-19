@@ -1,4 +1,5 @@
 // Pure logic shared by the CLI and the server. No I/O here.
+import { cleanModels, modelShares } from './model-rows.js';
 
 export const HOUR_MS = 60 * 60 * 1000;
 export const WINDOWS = Object.freeze({
@@ -71,13 +72,17 @@ export function computeShares(reports) {
         (r) => r.account[key] && r.local[key] && sameWindow(r.account[key].resetsAt, accountWin.resetsAt),
       );
       const totalCost = inWindow.reduce((sum, r) => sum + r.local[key].costUSD, 0);
-      const rows = inWindow.map((r) => ({
-        device: r.device,
-        reportedAt: r.reportedAt,
-        costUSD: r.local[key].costUSD,
-        tokens: r.local[key].tokens,
-        sharePct: totalCost > 0 ? (accountWin.pct * r.local[key].costUSD) / totalCost : 0,
-      }));
+      const rows = inWindow.map((r) => {
+        const sharePct = totalCost > 0 ? (accountWin.pct * r.local[key].costUSD) / totalCost : 0;
+        return {
+          device: r.device,
+          reportedAt: r.reportedAt,
+          costUSD: r.local[key].costUSD,
+          tokens: r.local[key].tokens,
+          sharePct,
+          models: modelShares(r.local[key].models, sharePct),
+        };
+      });
       return [key, rows.sort((a, b) => b.costUSD - a.costUSD)];
     }),
   );
@@ -103,7 +108,7 @@ function cleanAccountWindow(acc) {
 
 function cleanLocalWindow(loc) {
   return loc && inRange(loc.costUSD, MAX_COST_USD) && inRange(loc.tokens, MAX_TOKENS)
-    ? { costUSD: loc.costUSD, tokens: loc.tokens }
+    ? { costUSD: loc.costUSD, tokens: loc.tokens, models: cleanModels(loc.models) }
     : null;
 }
 

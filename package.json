@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-tracker",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Self-hosted multi-device Claude plan usage tracker: Claude Code plugin + server with web dashboard",
   "type": "module",
   "private": true,

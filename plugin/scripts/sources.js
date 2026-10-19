@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { parseAccountUsage } from './core.js';
+import { unitPrices } from './models.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -88,6 +89,15 @@ async function runCcusage(args) {
     }
   }
   throw new Error(`Failed to run ccusage (install it: npm i -g ccusage) — ${failures.join('; ')}`);
+}
+
+/** $ per weighted token for each model, derived from ccusage's per-model daily costs. */
+export async function fetchModelPrices({ now = new Date() } = {}) {
+  const since = yyyymmdd(new Date(now.getTime() - LOOKBACK_DAYS * DAY_MS));
+  const stdout = await runCcusage(['claude', 'daily', '--breakdown', '--json', '--since', since]);
+  const daily = JSON.parse(stdout)?.daily;
+  if (!Array.isArray(daily)) throw new Error('Unexpected ccusage daily JSON (no "daily" array)');
+  return unitPrices(daily);
 }
 
 /** Hour-granular local usage blocks from ccusage (priced by ccusage itself). */

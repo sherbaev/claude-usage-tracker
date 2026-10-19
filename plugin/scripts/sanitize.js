@@ -1,8 +1,11 @@
 // Server responses end up in the terminal and in Claude's context (slash command output), so treat
 // them as untrusted: keep only known fields with valid values, strip control characters, truncate text.
 import { WINDOWS, isValidDeviceName } from './core.js';
+import { MAX_MODEL_ROWS } from './model-rows.js';
 
 const MAX_TEXT = 200;
+const MAX_LABEL = 80;
+const MAX_MODEL_ROWS_SHOWN = MAX_MODEL_ROWS + 1;
 // C0/C1 control characters, including ESC (ANSI sequences).
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 
@@ -11,6 +14,16 @@ const isoOrNull = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) 
 
 export const cleanText = (value, max = MAX_TEXT) => String(value ?? '').replace(CONTROL_CHARS, ' ').slice(0, max);
 
+function cleanModelRow(row) {
+  const sharePct = finite(row?.sharePct);
+  const costUSD = finite(row?.costUSD);
+  const tokens = finite(row?.tokens);
+  if (typeof row?.label !== 'string' || sharePct === null || costUSD === null || tokens === null) return null;
+  return { label: cleanText(row.label, MAX_LABEL), sharePct, costUSD, tokens };
+}
+
+const cleanModelRows = (rows) => (Array.isArray(rows) ? rows.slice(0, MAX_MODEL_ROWS_SHOWN).map(cleanModelRow).filter(Boolean) : []);
+
 function cleanRow(row) {
   if (!isValidDeviceName(row?.device)) return null;
   const sharePct = finite(row.sharePct);
@@ -18,7 +31,16 @@ function cleanRow(row) {
   const tokens = finite(row.tokens);
   const reportedAt = isoOrNull(row.reportedAt);
   if (sharePct === null || costUSD === null || tokens === null || reportedAt === null) return null;
-  return { device: row.device, reportedAt, sharePct, costUSD, tokens, limitPct: finite(row.limitPct), overLimit: row.overLimit === true };
+  return {
+    device: row.device,
+    reportedAt,
+    sharePct,
+    costUSD,
+    tokens,
+    limitPct: finite(row.limitPct),
+    overLimit: row.overLimit === true,
+    models: cleanModelRows(row.models),
+  };
 }
 
 function cleanAccountWindow(win) {
