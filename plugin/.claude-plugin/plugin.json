@@ -1,6 +1,6 @@
 {
   "name": "usage-tracker",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Track Claude 5-hour and weekly plan limits per device — plus Codex, Gemini CLI, OpenCode and other agents ccusage supports: per-device usage, caps, model / effort breakdown, web dashboard. /usage-tracker:status shows every device.",
   "author": {
     "name": "sherbaev",

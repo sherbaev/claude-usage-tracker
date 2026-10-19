@@ -107,6 +107,7 @@ export function openDatabase(file) {
     botByUser: db.prepare('SELECT * FROM telegram_bots WHERE user_id = ?'),
     botByWebhook: db.prepare('SELECT * FROM telegram_bots WHERE webhook_id = ?'),
     botByBotId: db.prepare('SELECT * FROM telegram_bots WHERE bot_id = ?'),
+    allBots: db.prepare('SELECT * FROM telegram_bots'),
     upsertBot: db.prepare(`
       INSERT INTO telegram_bots (user_id, bot_id, username, token_sealed, webhook_id, webhook_secret, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -185,6 +186,9 @@ export function openDatabase(file) {
     },
     getBotByWebhook(webhookId) {
       return toBot(q.botByWebhook.get(webhookId));
+    },
+    listBots() {
+      return q.allBots.all().map(toBot);
     },
     getBotByBotId(botId) {
       return toBot(q.botByBotId.get(botId));
