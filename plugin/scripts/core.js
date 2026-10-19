@@ -1,4 +1,5 @@
 // Pure logic shared by the CLI and the server. No I/O here.
+import { cleanAgents } from './agent-rows.js';
 import { cleanModels, modelShares } from './model-rows.js';
 
 export const HOUR_MS = 60 * 60 * 1000;
@@ -61,15 +62,16 @@ const sameWindow = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= SAME_WIN
  */
 export function computeShares(reports) {
   const fresh = [...reports].sort((a, b) => Date.parse(b.reportedAt) - Date.parse(a.reportedAt));
-  const latest = fresh[0];
-  if (!latest) return { account: null, windows: {} };
+  if (!fresh.length) return { account: null, windows: {} };
+  // Per window, the freshest report that has Claude data (a device may report only other agents).
+  const account = Object.fromEntries(Object.keys(WINDOWS).map((key) => [key, fresh.find((r) => r.account?.[key])?.account[key] ?? null]));
 
   const windows = Object.fromEntries(
     Object.keys(WINDOWS).map((key) => {
-      const accountWin = latest.account[key];
+      const accountWin = account[key];
       if (!accountWin) return [key, []];
       const inWindow = fresh.filter(
-        (r) => r.account[key] && r.local[key] && sameWindow(r.account[key].resetsAt, accountWin.resetsAt),
+        (r) => r.account?.[key] && r.local?.[key] && sameWindow(r.account[key].resetsAt, accountWin.resetsAt),
       );
       const totalCost = inWindow.reduce((sum, r) => sum + r.local[key].costUSD, 0);
       const rows = inWindow.map((r) => {
@@ -86,7 +88,7 @@ export function computeShares(reports) {
       return [key, rows.sort((a, b) => b.costUSD - a.costUSD)];
     }),
   );
-  return { account: latest.account, windows };
+  return { account, windows };
 }
 
 const DEVICE_RE = /^[\w.\- ]{1,64}$/;
@@ -126,5 +128,6 @@ export function validateReport(body) {
     reportedAt: new Date(body.reportedAt).toISOString(),
     account: Object.fromEntries(keys.map((k) => [k, cleanAccountWindow(body.account?.[k])])),
     local: Object.fromEntries(keys.map((k) => [k, cleanLocalWindow(body.local?.[k])])),
+    agents: cleanAgents(body.agents),
   };
 }

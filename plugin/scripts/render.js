@@ -113,6 +113,28 @@ function modelLines(summary, selfDevice, c) {
   return ['', `${c.bold('By model · effort')} ${c.dim('· each device % split by cost')}`, c.dim(header), ...rows];
 }
 
+const USAGE_WIDTH = 19;
+const usageText = (t) => `${usd(t.costUSD)} · ${formatTokens(t.tokens)}`.padEnd(USAGE_WIDTH);
+
+function planText(plan) {
+  if (!plan) return '';
+  const parts = [plan.fiveHour && `5h ${plan.fiveHour.pct.toFixed(0)}%`, plan.sevenDay && `weekly ${plan.sevenDay.pct.toFixed(0)}%`];
+  return `plan: ${parts.filter(Boolean).join(' · ')}`;
+}
+
+/** Codex, Gemini CLI, … per device: today and last 7 days (from ccusage), plus plan % when the agent records it. */
+function agentLines(summary, selfDevice, c) {
+  const agents = (summary.agents ?? []).filter((a) => a.devices.length);
+  if (!agents.length) return [];
+  const header = `    ${'Device'.padEnd(DEVICE_WIDTH)}${'Today'.padEnd(USAGE_WIDTH)}${'Last 7 days'.padEnd(USAGE_WIDTH)}Top model`;
+  const blocks = agents.flatMap((agent) => [
+    `  ${c.bold(agent.label.padEnd(10))} ${c.dim(planText(agent.plan))}`,
+    c.dim(header),
+    ...agent.devices.map((d) => `    ${deviceName(d.device, selfDevice, c)}${usageText(d.today)}${usageText(d.week)}${d.models[0]?.label ?? ''}`),
+  ]);
+  return ['', `${c.bold('Other coding agents')} ${c.dim('· today / last 7 days, from ccusage')}`, ...blocks];
+}
+
 /**
  * @param {{ device: string, account: object, local: object, summary?: object|null, syncError?: string|null, serverUrl?: string|null }} data
  */
@@ -125,7 +147,11 @@ export function renderPanel(data, { now = new Date(), color = false, timeZone } 
   ];
   if (data.summary) {
     lines.push('', `${c.bold('Per device')} ${c.dim(`· ${data.serverUrl} · % split by cost share`)}`);
-    lines.push(...deviceLines(data.summary, data.device, now, c), ...modelLines(data.summary, data.device, c));
+    lines.push(
+      ...deviceLines(data.summary, data.device, now, c),
+      ...modelLines(data.summary, data.device, c),
+      ...agentLines(data.summary, data.device, c),
+    );
   } else if (data.syncError) {
     lines.push('', c.yellow(`  sync: ${data.syncError}`));
   } else {

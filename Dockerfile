@@ -4,7 +4,7 @@ WORKDIR /app
 ENV NODE_ENV=production PORT=8787 DATA_DIR=/data TRUST_PROXY=1
 COPY package.json ./
 COPY plugin/package.json ./plugin/package.json
-COPY plugin/scripts/core.js plugin/scripts/limits.js plugin/scripts/model-rows.js ./plugin/scripts/
+COPY plugin/scripts/core.js plugin/scripts/limits.js plugin/scripts/model-rows.js plugin/scripts/agent-rows.js ./plugin/scripts/
 COPY server ./server
 RUN mkdir -p /data && chown node:node /data
 USER node

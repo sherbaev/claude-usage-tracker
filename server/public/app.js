@@ -273,11 +273,47 @@ function renderDevices(summary, { force = false } = {}) {
   $('devices').replaceChildren(el('table', {}, [el('thead', {}, [head]), el('tbody', {}, rows)]));
 }
 
+// ---------- other coding agents (Codex, Gemini CLI, …) ----------
+const MODELS_SHOWN = 3;
+const PLAN_LABELS = { fiveHour: '5h', sevenDay: 'Weekly' };
+
+function planPill(key, win) {
+  const resets = new Date(Math.round(Date.parse(win.resetsAt) / 60_000) * 60_000);
+  return el('div', { className: 'planpill' }, [
+    el('div', {}, [el('strong', { textContent: `${PLAN_LABELS[key]} ${fmtPct(win.pct)}` }), el('span', { className: 'muted small', textContent: ` · resets in ${fmtDuration(resets - Date.now())}` })]),
+    meter(win.pct, 'thin'),
+  ]);
+}
+
+const usageCell = (t) => el('td', {}, [el('strong', { textContent: fmtUsd(t.costUSD) }), el('div', { className: 'muted small', textContent: `${fmtTokens(t.tokens)} tok` })]);
+
+function agentBlock(agent) {
+  const plan = agent.plan ? Object.keys(PLAN_LABELS).filter((k) => agent.plan[k]).map((k) => planPill(k, agent.plan[k])) : [];
+  const head = el('tr', {}, ['Device', 'Today', 'Last 7 days', 'Models'].map((t) => el('th', { textContent: t })));
+  const rows = agent.devices.map((d) => el('tr', {}, [
+    el('td', {}, [el('div', { className: 'devname', textContent: d.device }), el('div', { className: 'muted small', textContent: `synced ${fmtAgo(d.reportedAt)}` })]),
+    usageCell(d.today),
+    usageCell(d.week),
+    el('td', { className: 'small', textContent: d.models.slice(0, MODELS_SHOWN).map((m) => `${m.label} (${fmtUsd(m.costUSD)})`).join(', ') || '—' }),
+  ]));
+  return el('div', { className: 'agent' }, [
+    el('div', { className: 'agenthead' }, [el('h3', { textContent: agent.label }), ...plan]),
+    el('table', {}, [el('thead', {}, [head]), el('tbody', {}, rows)]),
+  ]);
+}
+
+function renderAgents(summary) {
+  const agents = (summary.agents ?? []).filter((a) => a.devices.length);
+  $('agentsCard').hidden = !agents.length;
+  $('agents').replaceChildren(...agents.map(agentBlock));
+}
+
 async function refresh() {
   try {
     const summary = await api('GET', '/api/summary');
     renderWindows(summary);
     renderDevices(summary);
+    renderAgents(summary);
     $('refreshed').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   } catch (error) {
     if (error.status === 401) return signOut('Token is not valid on this server.');

@@ -28,7 +28,7 @@ test('sanitizeSummary drops rows with hostile names or bad numbers', () => {
   assert.deepEqual(clean.windows.sevenDay, []);
   assert.equal('injected' in clean.windows, false);
   assert.equal(clean.account.sevenDay, null);
-  assert.deepEqual(sanitizeSummary(null), { account: null, windows: { fiveHour: [], sevenDay: [] }, devices: [] });
+  assert.deepEqual(sanitizeSummary(null), { account: null, windows: { fiveHour: [], sevenDay: [] }, devices: [], agents: [] });
   const withDevices = sanitizeSummary({
     devices: [{ name: 'mac', reportedAt: '2026-10-19T06:00:00Z', limits: { fiveHour: 10, sevenDay: 'x', enforce: 1 } }],
   });
@@ -48,6 +48,29 @@ test('sanitizeSummary keeps model rows with clean labels and finite numbers only
     { label: ' [31mred line', sharePct: 2, costUSD: 0.2, tokens: 1 },
   ]);
   assert.deepEqual(clean.windows.fiveHour[1].models, []);
+});
+
+test('sanitizeSummary keeps agent usage with clean labels and numbers only', () => {
+  const agents = [
+    {
+      id: 'codex',
+      label: 'Codex\x1b[31m',
+      plan: { fiveHour: { pct: 20, resetsAt: '2026-10-19T08:00:00Z' }, sevenDay: { pct: 'x' } },
+      planObservedAt: '2026-10-19T06:00:00Z',
+      devices: [
+        { device: 'mac', reportedAt: '2026-10-19T06:00:00Z', today: { costUSD: 1, tokens: 2 }, week: { costUSD: 3, tokens: 4 }, models: [{ label: 'gpt-5.5', costUSD: 3, tokens: 4 }, { label: 'bad', costUSD: 'x', tokens: 1 }] },
+        { device: '<script>', reportedAt: '2026-10-19T06:00:00Z', today: { costUSD: 1, tokens: 2 }, week: { costUSD: 3, tokens: 4 } },
+      ],
+    },
+    { id: 'Bad Id', label: 'x', devices: [] },
+  ];
+  const clean = sanitizeSummary({ agents });
+  assert.equal(clean.agents.length, 1);
+  assert.equal(clean.agents[0].label, 'Codex [31m');
+  assert.deepEqual(clean.agents[0].plan, { fiveHour: { pct: 20, resetsAt: '2026-10-19T08:00:00.000Z' }, sevenDay: null });
+  assert.deepEqual(clean.agents[0].devices.map((d) => d.device), ['mac']);
+  assert.deepEqual(clean.agents[0].devices[0].models, [{ label: 'gpt-5.5', costUSD: 3, tokens: 4 }]);
+  assert.deepEqual(sanitizeSummary({}).agents, []);
 });
 
 test('sanitizeDeviceList and sanitizeStatus keep only valid fields', () => {

@@ -158,3 +158,8 @@ footer a { color: var(--accent); }
   td { border: 0; padding: 4px 0; }
   td.right { text-align: left; }
 }
+
+.agent + .agent { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.agenthead { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 4px; }
+.agenthead h3 { margin: 0; font-size: 15px; color: var(--text); font-weight: 600; }
+.planpill { min-width: 180px; }

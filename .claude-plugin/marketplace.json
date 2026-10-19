@@ -12,8 +12,8 @@
     {
       "name": "usage-tracker",
       "source": "./plugin",
-      "version": "0.4.1",
-      "description": "Track Claude 5-hour and weekly plan limits per device: per-device usage, caps, and model / effort breakdown for Claude Code, with a web dashboard.",
+      "version": "0.5.0",
+      "description": "Track Claude 5-hour and weekly plan limits per device — plus Codex, Gemini CLI, OpenCode and other agents ccusage supports: per-device usage, caps, model / effort breakdown, web dashboard.",
       "category": "productivity",
       "homepage": "https://github.com/sherbaev/claude-usage-tracker",
       "keywords": [
@@ -27,7 +27,10 @@
         "ccusage",
         "anthropic",
         "self-hosted",
-        "dashboard"
+        "dashboard",
+        "codex",
+        "gemini-cli",
+        "opencode"
       ],
       "tags": [
         "usage",

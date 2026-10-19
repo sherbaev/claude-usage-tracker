@@ -76,7 +76,8 @@ function groupRows(entries, prices) {
   return [...groups.values()].sort((a, b) => b.costUSD - a.costUSD || b.tokens - a.tokens);
 }
 
-function foldTail(rows) {
+/** Keeps the top rows and folds the rest into one "other" row. Rows must be sorted. */
+export function foldTail(rows) {
   if (rows.length <= MAX_MODEL_ROWS + 1) return rows;
   const tail = rows.slice(MAX_MODEL_ROWS);
   const other = { model: OTHER_MODEL, effort: null, speed: null, costUSD: sumOf(tail, 'costUSD'), tokens: sumOf(tail, 'tokens') };
