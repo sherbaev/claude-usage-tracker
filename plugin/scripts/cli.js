@@ -5,10 +5,13 @@
 //   hook                      for SessionStart/Stop hooks: throttled push, never fails
 //   guard                     for the UserPromptSubmit hook: exit 2 (block) when this device is over a
 //                             cap set to "block" on the website
+//   background on|off|status  report every 5 minutes even when Claude Code is closed (macOS LaunchAgent;
+//                             elsewhere prints a crontab line), so Claude Desktop / claude.ai usage is seen
 //   setup --server URL --token TOKEN [--device NAME]
 //   register --server URL [--code CODE]
 //   config                    show effective config (token redacted)
 // Flags: --json, --no-sync, --no-color
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { isValidDeviceName, localWindowTotals } from './core.js';
 import {
@@ -21,6 +24,7 @@ import {
   saveConfig,
   updateState,
 } from './config.js';
+import { backgroundStatus, cronLine, disableBackground, enableBackground, refreshBackground } from './background.js';
 import { activeViolations, deviceStatus, NO_LIMITS } from './limits.js';
 import { attachCodexPlan, claudeDaily, summarizeAgents } from './agents.js';
 import { readCodexSnapshot } from './codex.js';
@@ -42,6 +46,9 @@ const GUARD_REFRESH_SEC = 60;
 // When Anthropic's usage endpoint is briefly unavailable (e.g. HTTP 429), reuse the last snapshot.
 const ACCOUNT_FALLBACK_SEC = 15 * 60;
 const BLOCK_EXIT_CODE = 2;
+const IS_MAC = process.platform === 'darwin';
+// What the background job runs: this node and this copy of the plugin, with the hooks' state directory.
+const SELF = Object.freeze({ node: process.execPath, cli: fileURLToPath(import.meta.url), pluginData: process.env.CLAUDE_PLUGIN_DATA });
 
 const out = (text) => process.stdout.write(`${text}\n`);
 const redact = (token) => (token ? `${token.slice(0, 8)}…${token.slice(-4)}` : null);
@@ -155,9 +162,27 @@ async function hook() {
     await persistPluginOptions();
     const config = await loadConfig();
     if (config.serverUrl) await push({ throttle: HOOK_THROTTLE_SEC });
+    if (IS_MAC) await refreshBackground(SELF);
   } catch (error) {
     process.stderr.write(`usage-tracker: ${error.message}\n`);
   }
+}
+
+async function background(_opts, action = 'status') {
+  if (!['on', 'off', 'status'].includes(action)) throw new Error('usage: background on|off|status');
+  if (!IS_MAC) {
+    out('Background reporting is built in on macOS only. On this system add this line with `crontab -e`:');
+    return out(cronLine(SELF));
+  }
+  if (action === 'on') {
+    if (!(await loadConfig()).serverUrl) throw new Error('not connected to a tracker server — run /usage-tracker:setup first');
+    await enableBackground(SELF);
+    return out('Background reporting is on: this Mac reports every 5 minutes, even when Claude Code is closed.\n' +
+      'It uses the Claude login that Claude Code refreshes, so open Claude Code at least once a day.');
+  }
+  if (action === 'off') return out((await disableBackground()) ? 'Background reporting is off.' : 'Background reporting was not on.');
+  const status = await backgroundStatus();
+  out(status.installed ? `Background reporting is on (every 5 minutes, ${status.cli}).` : 'Background reporting is off. Turn it on with: background on');
 }
 
 const blockingViolations = (state) => (state.status?.enforce ? activeViolations(state.status) : []);
@@ -213,7 +238,7 @@ async function showConfig() {
   out(JSON.stringify({ ...config, token: redact(config.token), configFile: CONFIG_PATH }, null, 2));
 }
 
-const COMMANDS = { status, push, hook, guard, setup, register, config: showConfig };
+const COMMANDS = { status, push, hook, guard, background, setup, register, config: showConfig };
 
 async function main(argv) {
   const { values, positionals } = parseArgs({
@@ -233,7 +258,7 @@ async function main(argv) {
   const name = positionals[0] ?? 'status';
   const command = COMMANDS[name];
   if (!command) throw new Error(`unknown command "${name}" (${Object.keys(COMMANDS).join(', ')})`);
-  await command(values);
+  await command(values, positionals[1]);
 }
 
 main(process.argv.slice(2)).catch((error) => {
