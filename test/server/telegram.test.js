@@ -66,9 +66,10 @@ async function connected(ctx, token) {
   return { hook, path, send, tap, link };
 }
 
-const report = (fivePct, { device = 'Work Mac', share } = {}) => ({
+const report = (fivePct, { device = 'Work Mac', share, surfaces } = {}) => ({
   device,
   reportedAt: new Date().toISOString(),
+  surfaces,
   account: {
     fiveHour: { pct: fivePct, resetsAt: new Date(Date.now() + 3600_000).toISOString() },
     sevenDay: { pct: 20, resetsAt: new Date(Date.now() + 86400_000).toISOString() },
@@ -279,4 +280,52 @@ test('usage outside Claude Code: the bot asks whose it was and the answer moves 
   await bot.tap(111, 'o:ask');
   assert.equal(ctx.tg.sent(111).length, sentBefore + 1);
   assert.match(ctx.tg.sent(111).at(-1), /Whose was it\?/);
+});
+
+test('backfill: unanswered outside usage goes to a device through the API; GET /api/outside shows the rate', async () => {
+  const ctx = await boot();
+  const token = await ctx.register();
+  await ctx.call('POST', '/api/report', { token, body: report(10, { share: 20 }) }); // 0.5 % per dollar
+  await ctx.call('POST', '/api/report', { token, body: report(14, { share: 20 }) }); // 4 points more, no Claude Code
+  const before = (await ctx.call('GET', '/api/outside', { token })).json.data;
+  assert.equal(before.rates.fiveHour, 0.5);
+  assert.equal(before.pending.length, 1);
+
+  assert.equal((await ctx.call('POST', '/api/outside/assign', { token, body: { device: 'Nope' } })).status, 404);
+  assert.equal((await ctx.call('POST', '/api/outside/assign', { token, body: {} })).status, 400);
+  const res = await ctx.call('POST', '/api/outside/assign', { token, body: { device: 'Work Mac' } });
+  assert.equal(res.json.data.assigned, 1);
+  const s = (await ctx.call('GET', '/api/summary', { token })).json.data;
+  assert.equal(s.windows.fiveHour[0].outsidePct, 4);
+  assert.equal(s.outside.fiveHour.unassignedPct, 0);
+  assert.equal((await ctx.call('GET', '/api/outside')).status, 401);
+});
+
+test('outside usage is put on the device where Claude Desktop was just used, and the bot says so', async () => {
+  const ctx = await boot();
+  const token = await ctx.register();
+  const bot = await connected(ctx, token);
+  await bot.link(111);
+  await ctx.call('POST', '/api/report', { token, body: report(10, { share: 20, surfaces: {} }) }); // reports activity: none
+  const desktop = { desktop: new Date().toISOString() };
+  await ctx.call('POST', '/api/report', { token, body: report(14, { device: 'Home PC', share: 0, surfaces: desktop }) });
+  const message = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.match(message.text, /Counted for <b>Home PC<\/b> automatically — Claude Desktop was used there/);
+  assert.ok(message.reply_markup.inline_keyboard.flat().some((b) => b.text === '✅ Home PC'), 'can still be changed');
+  const s = (await ctx.call('GET', '/api/summary', { token })).json.data;
+  assert.equal(s.windows.fiveHour.find((r) => r.device === 'Home PC').outsidePct, 4);
+});
+
+test('backfill with explicit amounts puts them on a device in the current windows', async () => {
+  const ctx = await boot();
+  const token = await ctx.register();
+  await ctx.call('POST', '/api/report', { token, body: report(10) });
+  const assign = (body) => ctx.call('POST', '/api/outside/assign', { token, body: { device: 'Work Mac', ...body } });
+  assert.equal((await assign({ amounts: { fiveHour: 11 } })).status, 400, 'more than the plan shows');
+  assert.equal((await assign({ amounts: { fiveHour: -1 } })).status, 400);
+  const res = await assign({ amounts: { fiveHour: 3, sevenDay: 1.5 } });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  const s = (await ctx.call('GET', '/api/summary', { token })).json.data;
+  assert.equal(s.windows.fiveHour[0].outsidePct, 3);
+  assert.equal(s.windows.sevenDay[0].outsidePct, 1.5);
 });

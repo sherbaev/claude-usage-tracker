@@ -231,10 +231,14 @@ Your plan went up more than your devices' Claude Code explains — likely Claude
 - **🙈 Not sure** splits it across devices by their Claude Code usage, and it isn't asked about again.
 - Until you answer, the usage is shown on its own (`🧭 Outside Claude Code … not assigned` in 📊 Usage, and on the
   dashboard) instead of being added to your devices. **🧭 Assign outside usage** asks again.
-- **How it's found:** from finished 5-hour windows, the server learns how much plan % a dollar of Claude Code uses
-  on your account. Plan % beyond that is outside usage, even while Claude Code is running at the same time.
-  Learning needs two finished 5-hour windows with some Claude Code use. Until then, only a rise with no Claude Code
-  activity at all is caught.
+- **How it's found:** the server learns how much plan % a dollar of Claude Code uses on your account: from the
+  lowest % per dollar it has seen (right away), then from finished 5-hour windows. Each device gets only the %
+  its own Claude Code explains, so a device you aren't using doesn't grow. Plan % beyond that is outside usage,
+  even while Claude Code is running at the same time.
+- **Which device:** if Claude Desktop, claude.ai or the Claude Chrome extension was used on exactly one device
+  around that time, the usage is put on that device automatically and the bot tells you (tap another device to
+  change it). Otherwise the bot asks. **🧭 Assign outside usage** also asks about smaller amounts that haven't
+  reached the threshold yet.
 - It's an estimate. Anthropic doesn't say which app used the plan, and the learned rate varies a little with the
   models you use. Amounts under about 20% of your Claude Code usage, or under 2 points (5-hour) / 1 point (weekly),
   are treated as noise and add up until they're large enough to ask about.
@@ -266,6 +270,8 @@ node ~/.usage-tracker/plugin/scripts/cli.js setup --server <server-url> --token 
 
 - Only usage numbers are sent: device name, %, cost and token counts, model names and effort levels. **Never** prompts,
   code, file paths or your Claude / Codex login.
+- To tell which device used Claude Desktop, claude.ai or the Claude Chrome extension, the plugin sends **when** each
+  one last wrote its own local storage (a timestamp only). It reads file times, never their contents.
 - Your Claude login stays on your device and is only used with `api.anthropic.com`.
 - The server stores a hash of your token, not the token. Delete your account and all its data from the website
   anytime.
