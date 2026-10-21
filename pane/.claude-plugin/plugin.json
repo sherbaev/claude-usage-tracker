@@ -1,0 +1,24 @@
+{
+  "name": "usage-tracker-pane",
+  "version": "0.1.0",
+  "description": "Claude plan usage (5-hour / weekly) for every device, live in a pane beside the chat and in the status line — reads your Claude Usage Tracker server.",
+  "author": { "name": "sherbaev", "url": "https://github.com/sherbaev" },
+  "homepage": "https://github.com/sherbaev/claude-usage-tracker",
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Tracker server URL",
+      "description": "Your Claude Usage Tracker server. Empty: uses the one /usage-tracker:setup saved on this computer, or /usage connect.",
+      "default": ""
+    },
+    "token": {
+      "type": "string",
+      "title": "Account token",
+      "description": "The cut_… token from the tracker website.",
+      "sensitive": true,
+      "default": ""
+    }
+  }
+}
