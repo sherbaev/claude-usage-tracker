@@ -54,41 +54,81 @@ export function localWindowTotals(blocks, account) {
   );
 }
 
-const sameWindow = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= SAME_WINDOW_TOLERANCE_MS;
+export const sameWindow = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= SAME_WINDOW_TOLERANCE_MS;
 
 /**
- * Splits the account-wide utilization across devices proportionally to each
- * device's local cost inside the same window. Uses the freshest account snapshot.
+ * Per window: the freshest account snapshot (from a report that has Claude data — a device may report
+ * only other agents) and the reports with local usage in that same window.
  */
-export function computeShares(reports) {
+export function windowPools(reports) {
   const fresh = [...reports].sort((a, b) => Date.parse(b.reportedAt) - Date.parse(a.reportedAt));
-  if (!fresh.length) return { account: null, windows: {} };
-  // Per window, the freshest report that has Claude data (a device may report only other agents).
   const account = Object.fromEntries(Object.keys(WINDOWS).map((key) => [key, fresh.find((r) => r.account?.[key])?.account[key] ?? null]));
-
-  const windows = Object.fromEntries(
-    Object.keys(WINDOWS).map((key) => {
-      const accountWin = account[key];
-      if (!accountWin) return [key, []];
-      const inWindow = fresh.filter(
-        (r) => r.account?.[key] && r.local?.[key] && sameWindow(r.account[key].resetsAt, accountWin.resetsAt),
-      );
-      const totalCost = inWindow.reduce((sum, r) => sum + r.local[key].costUSD, 0);
-      const rows = inWindow.map((r) => {
-        const sharePct = totalCost > 0 ? (accountWin.pct * r.local[key].costUSD) / totalCost : 0;
-        return {
-          device: r.device,
-          reportedAt: r.reportedAt,
-          costUSD: r.local[key].costUSD,
-          tokens: r.local[key].tokens,
-          sharePct,
-          models: modelShares(r.local[key].models, sharePct),
-        };
-      });
-      return [key, rows.sort((a, b) => b.costUSD - a.costUSD)];
-    }),
+  const inWindow = Object.fromEntries(
+    Object.keys(WINDOWS).map((key) => [
+      key,
+      account[key] ? fresh.filter((r) => r.account?.[key] && r.local?.[key] && sameWindow(r.account[key].resetsAt, account[key].resetsAt)) : [],
+    ]),
   );
-  return { account, windows };
+  return { account, inWindow };
+}
+
+/**
+ * Usage outside Claude Code (Claude Desktop, claude.ai, the Chrome extension) in one window: the % the
+ * user assigned to each known device, and the % nobody has been assigned yet.
+ */
+function outsideUsage(events, key, accountWin, knownDevices) {
+  return events
+    .filter((e) => e.windows?.[key] && sameWindow(e.windows[key].resetsAt, accountWin.resetsAt))
+    .filter((e) => !e.device || knownDevices.has(e.device))
+    .reduce(
+      (acc, e) =>
+        e.device
+          ? { ...acc, assigned: { ...acc.assigned, [e.device]: (acc.assigned[e.device] ?? 0) + e.windows[key].pct } }
+          : { ...acc, unassignedPct: acc.unassignedPct + e.windows[key].pct },
+      { assigned: {}, unassignedPct: 0 },
+    );
+}
+
+function windowRows(key, accountWin, inWindow, outside, reportedAt) {
+  const assignedTotal = Object.values(outside.assigned).reduce((sum, pct) => sum + pct, 0);
+  const codePct = Math.max(0, accountWin.pct - assignedTotal - outside.unassignedPct);
+  const totalCost = inWindow.reduce((sum, r) => sum + r.local[key].costUSD, 0);
+  const rows = inWindow.map((r) => {
+    const fromCode = totalCost > 0 ? (codePct * r.local[key].costUSD) / totalCost : 0;
+    const outsidePct = outside.assigned[r.device] ?? 0;
+    return {
+      device: r.device,
+      reportedAt: r.reportedAt,
+      costUSD: r.local[key].costUSD,
+      tokens: r.local[key].tokens,
+      sharePct: fromCode + outsidePct,
+      outsidePct,
+      models: modelShares(r.local[key].models, fromCode),
+    };
+  });
+  const outsideOnly = Object.entries(outside.assigned)
+    .filter(([device]) => !inWindow.some((r) => r.device === device))
+    .map(([device, pct]) => ({ device, reportedAt: reportedAt.get(device), costUSD: 0, tokens: 0, sharePct: pct, outsidePct: pct, models: [] }));
+  return [...rows, ...outsideOnly].sort((a, b) => b.costUSD - a.costUSD);
+}
+
+/**
+ * Splits the account-wide utilization across devices proportionally to each device's local cost inside
+ * the same window, using the freshest account snapshot. Usage outside Claude Code (`outsideEvents`) is
+ * added to the device it was assigned to, or held apart as `outside[window].unassignedPct`.
+ */
+export function computeShares(reports, outsideEvents = []) {
+  if (!reports.length) return { account: null, windows: {} };
+  const { account, inWindow } = windowPools(reports);
+  const reportedAt = new Map(reports.map((r) => [r.device, r.reportedAt]));
+  const keys = Object.keys(WINDOWS);
+  const outside = Object.fromEntries(
+    keys.map((key) => [key, account[key] ? outsideUsage(outsideEvents, key, account[key], reportedAt) : { assigned: {}, unassignedPct: 0 }]),
+  );
+  const windows = Object.fromEntries(
+    keys.map((key) => [key, account[key] ? windowRows(key, account[key], inWindow[key], outside[key], reportedAt) : []]),
+  );
+  return { account, windows, outside: Object.fromEntries(keys.map((key) => [key, { unassignedPct: outside[key].unassignedPct }])) };
 }
 
 const DEVICE_RE = /^[\w.\- ]{1,64}$/;

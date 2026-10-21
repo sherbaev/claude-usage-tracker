@@ -1,4 +1,5 @@
-// SQLite repository (node:sqlite, no dependencies). Users, their devices' latest reports, per-device limits.
+// SQLite repository (node:sqlite, no dependencies). Users, their devices' latest reports, per-device limits,
+// Telegram bots and chats, alert state, and usage outside Claude Code.
 import { DatabaseSync } from 'node:sqlite';
 
 const SCHEMA = `
@@ -48,6 +49,10 @@ const SCHEMA = `
     settings TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS alert_state (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    state TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS outside_usage (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     state TEXT NOT NULL
   );
@@ -129,6 +134,10 @@ export function openDatabase(file) {
     alertState: db.prepare('SELECT state FROM alert_state WHERE user_id = ?'),
     upsertAlertState: db.prepare(`
       INSERT INTO alert_state (user_id, state) VALUES (?, ?)
+      ON CONFLICT (user_id) DO UPDATE SET state = excluded.state`),
+    outsideState: db.prepare('SELECT state FROM outside_usage WHERE user_id = ?'),
+    upsertOutsideState: db.prepare(`
+      INSERT INTO outside_usage (user_id, state) VALUES (?, ?)
       ON CONFLICT (user_id) DO UPDATE SET state = excluded.state`),
     pruneDevices: db.prepare('DELETE FROM devices WHERE reported_at < ?'),
     pruneOrphanLimits: db.prepare(`
@@ -226,6 +235,14 @@ export function openDatabase(file) {
     },
     setAlertState(userId, state) {
       q.upsertAlertState.run(userId, JSON.stringify(state));
+    },
+    /** Usage outside Claude Code: baseline and events (see outside.js), or null before the first report. */
+    getOutsideState(userId) {
+      const row = q.outsideState.get(userId);
+      return row ? JSON.parse(row.state) : null;
+    },
+    setOutsideState(userId, state) {
+      q.upsertOutsideState.run(userId, JSON.stringify(state));
     },
     /** Drops stale device reports, their limits, and accounts that were never or long not used. */
     prune({ reportsBefore, unusedUsersBefore, inactiveUsersBefore }) {

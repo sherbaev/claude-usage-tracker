@@ -96,7 +96,47 @@ test('computeShares takes each window from the freshest report that has Claude d
   const result = computeShares([report('mac', '2026-10-19T06:00:00Z', 3, 30, 8), codexOnly]);
   assert.equal(result.account.fiveHour.pct, 8);
   assert.deepEqual(result.windows.fiveHour.map((r) => r.device), ['mac']);
-  assert.deepEqual(computeShares([codexOnly]), { account: { fiveHour: null, sevenDay: null }, windows: { fiveHour: [], sevenDay: [] } });
+  const none = { unassignedPct: 0 };
+  assert.deepEqual(computeShares([codexOnly]), {
+    account: { fiveHour: null, sevenDay: null },
+    windows: { fiveHour: [], sevenDay: [] },
+    outside: { fiveHour: none, sevenDay: none },
+  });
+});
+
+const outsideEvent = (device, fivePct, fiveReset = '2026-10-19T08:00:00.000Z') => ({
+  id: 'e1',
+  device,
+  windows: { fiveHour: { pct: fivePct, resetsAt: fiveReset }, sevenDay: null },
+});
+
+test('computeShares holds unassigned outside usage apart from the devices', () => {
+  const result = computeShares([report('mac', '2026-10-19T06:00:00Z', 3, 30, 12), report('linux', '2026-10-19T06:30:00Z', 1, 90, 12)], [outsideEvent(null, 4)]);
+  assert.deepEqual(result.windows.fiveHour.map((r) => [r.device, r.sharePct, r.outsidePct]), [['mac', 6, 0], ['linux', 2, 0]]);
+  assert.equal(result.outside.fiveHour.unassignedPct, 4);
+  assert.equal(result.outside.sevenDay.unassignedPct, 0);
+});
+
+test('computeShares adds assigned outside usage to that device only', () => {
+  const reports = [report('mac', '2026-10-19T06:00:00Z', 3, 30, 12), report('linux', '2026-10-19T06:30:00Z', 1, 90, 12)];
+  const result = computeShares(reports, [outsideEvent('linux', 4)]);
+  assert.deepEqual(result.windows.fiveHour.map((r) => [r.device, r.sharePct, r.outsidePct]), [['mac', 6, 0], ['linux', 6, 4]]);
+  assert.equal(result.windows.fiveHour[1].models.length, 0);
+  assert.equal(result.outside.fiveHour.unassignedPct, 0);
+});
+
+test('computeShares gives a device with only outside usage its own row', () => {
+  const idle = report('ipad', '2026-10-19T01:00:00Z', 0, 0, 1, '2026-10-19T03:00:00.000Z');
+  const result = computeShares([report('mac', '2026-10-19T06:00:00Z', 3, 30, 12), idle], [outsideEvent('ipad', 5)]);
+  const row = result.windows.fiveHour.find((r) => r.device === 'ipad');
+  assert.deepEqual([row.sharePct, row.outsidePct, row.costUSD], [5, 5, 0]);
+  assert.equal(result.windows.fiveHour.find((r) => r.device === 'mac').sharePct, 7);
+});
+
+test('computeShares ignores outside usage of another window or a removed device', () => {
+  const reports = [report('mac', '2026-10-19T06:00:00Z', 3, 30, 12)];
+  assert.equal(computeShares(reports, [outsideEvent(null, 4, '2026-10-19T03:00:00.000Z')]).windows.fiveHour[0].sharePct, 12);
+  assert.equal(computeShares(reports, [outsideEvent('gone', 4)]).windows.fiveHour[0].sharePct, 12);
 });
 
 test('validateReport keeps cleaned agent usage', () => {

@@ -6,6 +6,7 @@ import { computeShares, isValidDeviceName, validateReport } from '../../plugin/s
 import { applyLimits, deviceStatus, NO_LIMITS, validateLimits } from '../../plugin/scripts/limits.js';
 import { generateToken, hashToken, isWellFormedToken, safeEqual } from './auth.js';
 import { bearerToken, clientIp, HttpError, readJsonBody, sendFile, sendJson } from './http.js';
+import { detectOutside, EMPTY_OUTSIDE } from './outside.js';
 import { createRateLimiter } from './ratelimit.js';
 import { createTelegramApi } from './telegram/api.js';
 import { createSecretBox } from './telegram/secret-box.js';
@@ -89,9 +90,9 @@ async function readValidated(req, validate) {
  *           maxDevicesPerUser?: number, maxUsers?: number, log?: (msg: string) => void }} options
  */
 /**
- * @param {{ ..., telegram?: { key?: Buffer, publicUrl?: string, fetch?: typeof fetch, base?: string, avatar?: Buffer } }} options
+ * @param {{ ..., outsideSettleMs?: number, telegram?: { key?: Buffer, publicUrl?: string, fetch?: typeof fetch, base?: string, avatar?: Buffer } }} options
  */
-export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser = 20, maxUsers = 10_000, telegram = {}, log = () => {} }) {
+export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser = 20, maxUsers = 10_000, outsideSettleMs, telegram = {}, log = () => {} }) {
   const staticFiles = loadStatic();
   const telegramLimiter = createRateLimiter({ limit: TELEGRAM_ACTIONS_PER_HOUR, windowMs: 60 * MINUTE_MS });
   const ipLimiter = createRateLimiter({ limit: REQUESTS_PER_MINUTE_PER_IP, windowMs: MINUTE_MS });
@@ -118,12 +119,15 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     return { token };
   }
 
+  const outsideState = (userId) => db.getOutsideState(userId) ?? EMPTY_OUTSIDE;
+
   function limitedSummary(user) {
     const reports = db.listReports(user.id);
     const limits = db.listLimits(user.id);
     const devices = reports.map((r) => ({ name: r.device, reportedAt: r.reportedAt, limits: limits[r.device] ?? NO_LIMITS }));
     const agents = summarizeAgentReports(reports);
-    return { summary: { ...applyLimits(computeShares(reports), limits), devices, agents }, limits };
+    const shares = computeShares(reports, outsideState(user.id).events);
+    return { summary: { ...applyLimits(shares, limits), devices, agents }, limits };
   }
 
   const tg = createTelegramService({
@@ -150,8 +154,12 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
       throw new HttpError(403, `device limit (${maxDevicesPerUser}) reached — remove an old device on the website`);
     }
     db.upsertReport(user.id, clean);
+    const outside = detectOutside(outsideState(user.id), db.listReports(user.id), { settleMs: outsideSettleMs });
+    db.setOutsideState(user.id, outside.state);
     const { summary, limits } = limitedSummary(user);
     await tg.notify(user, summary).catch((error) => log(`telegram alerts failed: ${error.message}`));
+    // Only a new event is announced; growth of an unanswered one shows in 📊 Usage and when it is answered.
+    if (outside.isNew) await tg.askOutside(user, outside.event).catch((error) => log(`telegram outside-usage question failed: ${error.message}`));
     return { device: clean.device, status: deviceStatus(summary, clean.device, limits[clean.device]) };
   }
 

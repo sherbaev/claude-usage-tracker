@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { alertCandidates, DEFAULT_ALERTS, evaluateAlerts, normalizeAlertSettings, validateAlertSettings } from '../../server/src/telegram/alerts.js';
 import { alertText, escapeHtml } from '../../server/src/telegram/format.js';
 import { createSecretBox } from '../../server/src/telegram/secret-box.js';
-import { alertsView, deviceKey, devicesView, helpView, MAIN_KEYBOARD, menuAction, usageView } from '../../server/src/telegram/views.js';
+import { alertsView, deviceKey, devicesView, helpView, MAIN_KEYBOARD, menuAction, outsideView, usageView } from '../../server/src/telegram/views.js';
 
 const NOW = Date.parse('2026-10-19T10:00:00Z');
 const R5 = '2026-10-19T12:00:00.000Z';
@@ -104,6 +104,47 @@ test('usageView: emoji bars, every device with its alert bell, Refresh button', 
   assert.match(usageView({ account: null, windows: {}, devices: [], agents: [] }, DEFAULT_ALERTS, NOW).text, /No devices have reported yet/);
 });
 
+test('usageView: outside Claude Code usage — unassigned total with an Assign button, assigned part per device', () => {
+  const base = summary(34, 71);
+  const withOutside = {
+    ...base,
+    windows: { ...base.windows, fiveHour: [{ ...base.windows.fiveHour[0], sharePct: 40, outsidePct: 6 }, base.windows.fiveHour[1]] },
+    outside: { fiveHour: { unassignedPct: 3 }, sevenDay: { unassignedPct: 1 } },
+  };
+  const view = usageView(withOutside, subscribed('Work Mac'), NOW);
+  assert.match(view.text, /🧭 Outside Claude Code: 5h 3\.0% · weekly 1\.0% — <b>not assigned<\/b>/);
+  assert.match(view.text, /⏱ 5h\s+.*40% of 50% cap · 🧭 6\.0% outside Claude Code/);
+  assert.deepEqual(view.reply_markup.inline_keyboard.flat().map((b) => b.callback_data), ['u:refresh', 'd:show', 'o:ask']);
+  const none = usageView({ ...base, outside: { fiveHour: { unassignedPct: 0 }, sevenDay: { unassignedPct: 0 } } }, DEFAULT_ALERTS, NOW);
+  assert.doesNotMatch(none.text, /🧭/);
+});
+
+test('outsideView asks whose usage it was, marks the chosen device, and closes when split', () => {
+  const event = { id: 'ab12cd34', device: null, windows: { fiveHour: { pct: 6, resetsAt: R5 }, sevenDay: { pct: 2, resetsAt: RW } } };
+  const names = ['Home <PC>', 'Work Mac'];
+  const ask = outsideView(event, names);
+  assert.match(ask.text, /🧭 <b>Usage outside Claude Code<\/b>/);
+  assert.match(ask.text, /Claude Desktop, claude\.ai or the Chrome extension/);
+  assert.match(ask.text, /⏱ 5h \+6\.0% · 📅 Weekly \+2\.0%/);
+  assert.match(ask.text, /Whose was it\?/);
+  const buttons = ask.reply_markup.inline_keyboard.flat().map((b) => [b.text, b.callback_data]);
+  assert.deepEqual(buttons, [
+    ['💻 Home <PC>', `o:ab12cd34:${deviceKey('Home <PC>')}`],
+    ['💻 Work Mac', `o:ab12cd34:${deviceKey('Work Mac')}`],
+    ['🙈 Not sure — split by usage', 'o:ab12cd34:x'],
+  ]);
+  assert.ok(buttons.every(([, data]) => Buffer.byteLength(data) <= 64));
+
+  const chosen = outsideView({ ...event, device: 'Work Mac' }, names);
+  assert.match(chosen.text, /✅ Counted for <b>Work Mac<\/b>/);
+  assert.ok(chosen.reply_markup.inline_keyboard.flat().some((b) => b.text === '✅ Work Mac'));
+
+  const split = outsideView(event, names, 'split');
+  assert.match(split.text, /🙈 Split across devices by their Claude Code usage/);
+  assert.equal(split.reply_markup, undefined);
+  assert.match(outsideView(null, names, 'expired').text, /⌛ Already answered, or its window has reset/);
+});
+
 test('devicesView: one toggle button per device, caps and a warning for devices without caps', () => {
   const view = devicesView(summary(34, 71), subscribed('Work Mac'), NOW);
   assert.match(view.text, /🔔 <b>Work Mac<\/b>.*🎯 Caps: 5h 50% · weekly 50%/s);
@@ -142,6 +183,7 @@ test('main keyboard buttons map to actions; slash commands still work', () => {
   assert.equal(menuAction('/usage@my_bot'), 'usage');
   assert.equal(menuAction('hello'), 'help');
   assert.match(helpView().text, /📊 Usage/);
+  assert.match(helpView().text, /🧭/);
   assert.equal(helpView().reply_markup, MAIN_KEYBOARD);
 });
 

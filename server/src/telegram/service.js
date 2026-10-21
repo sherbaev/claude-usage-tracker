@@ -1,12 +1,13 @@
 // Telegram integration: each account connects its own bot from the dashboard. The server configures the
 // bot (name, picture, menu, webhook), links chats with one-time codes, answers the button keyboard and
-// inline buttons, and sends near-limit / limit-hit alerts after reports.
+// inline buttons, sends near-limit / limit-hit alerts after reports, and asks whose usage outside Claude Code was.
 import { randomBytes } from 'node:crypto';
 import { safeEqual } from '../auth.js';
 import { HttpError } from '../http.js';
+import { assignEvent, EMPTY_OUTSIDE, ignoreEvent, pendingEvents } from '../outside.js';
 import { alertCandidates, evaluateAlerts, normalizeAlertSettings, validateAlertSettings } from './alerts.js';
 import { alertText } from './format.js';
-import { alertsView, deviceKey, devicesView, helpView, MAIN_KEYBOARD, menuAction, usageView } from './views.js';
+import { alertsView, deviceKey, devicesView, helpView, MAIN_KEYBOARD, menuAction, OUTSIDE_SPLIT, outsideView, usageView } from './views.js';
 
 export const BOT_NAME = 'Claude Usage Tracker';
 const BOT_TOKEN_RE = /^\d{5,15}:[\w-]{30,60}$/;
@@ -56,6 +57,8 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
   const tokenOf = (bot) => box.open(bot.tokenSealed);
   const alertSettings = (userId) => normalizeAlertSettings(db.getAlertSettings(userId));
   const isLinked = (bot, chatId) => db.listChats(bot.userId).some((c) => c.id === chatId);
+  const outsideState = (userId) => db.getOutsideState(userId) ?? EMPTY_OUTSIDE;
+  const deviceNames = (userId) => (getSummary(userId).devices ?? []).map((d) => d.name);
 
   async function send(bot, chatId, { text, reply_markup: replyMarkup }) {
     try {
@@ -250,12 +253,46 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
     return '✅ Saved';
   }
 
+  /** Assigns usage outside Claude Code to a device, or splits it by usage (OUTSIDE_SPLIT). Returns the toast. */
+  async function answerOutside(bot, chatId, messageId, id, key) {
+    const state = outsideState(bot.userId);
+    const names = deviceNames(bot.userId);
+    const event = state.events.find((e) => e.id === id);
+    if (!event) {
+      await edit(bot, chatId, messageId, outsideView(null, names, 'expired'));
+      return '⌛ Already answered, or its window has reset';
+    }
+    if (key === OUTSIDE_SPLIT) {
+      db.setOutsideState(bot.userId, ignoreEvent(state, id));
+      await edit(bot, chatId, messageId, outsideView(event, names, 'split'));
+      return '🙈 Split by Claude Code usage';
+    }
+    const device = names.find((n) => deviceKey(n) === key);
+    if (!device) return '⚠️ That device is gone — tap 🔄 Refresh.';
+    const assigned = assignEvent(state, id, device);
+    db.setOutsideState(bot.userId, assigned.state);
+    await edit(bot, chatId, messageId, outsideView(assigned.event, names));
+    // The device's share just grew: it may now be near or over its cap.
+    await notify({ id: bot.userId }, getSummary(bot.userId)).catch((error) => log(`telegram alerts failed: ${error.message}`));
+    return `✅ Counted for ${device}`;
+  }
+
+  /** 🧭 "o:ask" re-asks about every unanswered usage outside Claude Code; "o:<event>:<device key>" answers. */
+  async function handleOutside(bot, chatId, messageId, id, key) {
+    if (id !== 'ask') return answerOutside(bot, chatId, messageId, id, key);
+    const pending = pendingEvents(outsideState(bot.userId));
+    if (!pending.length) return '✅ Nothing to assign';
+    const names = deviceNames(bot.userId);
+    for (const event of pending) await send(bot, chatId, outsideView(event, names));
+    return '';
+  }
+
   /** Inline button taps. Every tap gets an answer (Telegram shows a spinner until then). */
   async function handleCallback(bot, query) {
     const chatId = query.message?.chat?.id;
     const messageId = query.message?.message_id;
     if (!Number.isSafeInteger(chatId) || !isLinked(bot, chatId)) return toast(bot, query.id, PRIVATE_TOAST, true);
-    const [scope, value = ''] = String(query.data ?? '').split(':');
+    const [scope, value = '', extra = ''] = String(query.data ?? '').split(':');
     const summary = () => getSummary(bot.userId);
     const settings = () => alertSettings(bot.userId);
     if (scope === 'u') {
@@ -272,6 +309,7 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
       await edit(bot, chatId, messageId, devicesView(summary(), settings()));
       return toast(bot, query.id, note, Boolean(warn));
     }
+    if (scope === 'o') return toast(bot, query.id, await handleOutside(bot, chatId, messageId, value, extra));
     if (scope === 'a') {
       const note = value === 'show' ? '' : changeSetting(bot, value);
       await edit(bot, chatId, messageId, alertsView(settings(), summary()));
@@ -306,6 +344,15 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
     await Promise.all(chats.map((c) => send(bot, c.id, message)));
   }
 
+  /** After a report that found usage outside Claude Code: ask the linked chats whose it was. */
+  async function askOutside(user, event) {
+    const bot = db.getBot(user.id);
+    const chats = bot ? db.listChats(user.id) : [];
+    if (!chats.length) return;
+    const message = outsideView(event, deviceNames(user.id));
+    await Promise.all(chats.map((c) => send(bot, c.id, message)));
+  }
+
   /** Bots connected before inline buttons existed only receive messages: also subscribe them to button taps. */
   async function upgradeWebhooks() {
     for (const bot of db.listBots()) {
@@ -321,5 +368,5 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
     }
   }
 
-  return { status, connect, disconnect, createLink, unlinkChat, setAlerts, sendTest, handleWebhook, notify, upgradeWebhooks };
+  return { status, connect, disconnect, createLink, unlinkChat, setAlerts, sendTest, handleWebhook, notify, askOutside, upgradeWebhooks };
 }
