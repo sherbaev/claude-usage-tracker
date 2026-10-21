@@ -83,15 +83,17 @@ function shareText(row) {
   return `${bar} ${pct(row.sharePct)} of ${row.limitPct}% cap`;
 }
 
-/** One window of one device, e.g. "⏱ 5h  🟩🟩⬜⬜⬜ 9.0% of 50% cap · 🧭 2.0% outside Claude Code". */
-function deviceWindowLine(row, icon, label) {
-  if (!row) return null;
-  const outside = row.outsidePct > 0 ? ` · 🧭 ${pct(row.outsidePct)} outside Claude Code` : '';
-  return `${INDENT}${icon} ${label}  ${shareText(row)}${outside}`;
+/**
+ * One window of one device, e.g. "⏱ 5h  🟩🟩⬜⬜⬜ 9.0% of 50% cap", and under it, when part of that came from
+ * Claude Desktop, claude.ai or the Chrome extension, "🧭 incl. 2.0% Desktop / web" (its own line, so it never wraps).
+ */
+function deviceWindowLines(row, icon, label) {
+  if (!row) return [];
+  const outside = row.outsidePct > 0 ? [`${INDENT}${INDENT}🧭 incl. ${pct(row.outsidePct)} Desktop / web`] : [];
+  return [`${INDENT}${icon} ${label}  ${shareText(row)}`, ...outside];
 }
 
-const deviceWindowLines = (summary, name) =>
-  PLAN_ROWS.map(([key, icon]) => deviceWindowLine(rowFor(summary, key, name), icon, LABEL[key])).filter(Boolean);
+const deviceLines = (summary, name) => PLAN_ROWS.flatMap(([key, icon]) => deviceWindowLines(rowFor(summary, key, name), icon, LABEL[key]));
 
 /** Usage outside Claude Code nobody has been assigned yet, e.g. "5h 3.0% · weekly 1.0%", or ''. */
 function unassignedText(outside) {
@@ -102,7 +104,7 @@ function unassignedText(outside) {
 
 function deviceUsageLines(summary, settings) {
   return deviceNames(summary).flatMap((name) => {
-    const windows = deviceWindowLines(summary, name);
+    const windows = deviceLines(summary, name);
     return [`${bell(settings, name)} <b>${escapeHtml(name)}</b>`, ...(windows.length ? windows : [`${INDENT}💤 no Claude usage in these windows`])];
   });
 }
@@ -123,7 +125,7 @@ function agentLines(agents) {
 /** 📊 Usage: plan windows, every device (with its alert bell), other agents. */
 export function usageView(summary, settings, now = Date.now()) {
   const unassigned = unassignedText(summary.outside);
-  const plan = [...planLines(summary.account, now), ...(unassigned ? [`🧭 Outside Claude Code: ${unassigned} — <b>not assigned</b>`] : [])];
+  const plan = [...planLines(summary.account, now), ...(unassigned ? [`🧭 Desktop / web, not assigned: ${unassigned}`] : [])];
   const devices = deviceUsageLines(summary, settings);
   const agents = agentLines(summary.agents);
   const assign = unassigned ? [[button('🧭 Assign outside usage', 'o:ask')]] : [];
@@ -151,7 +153,7 @@ export function devicesView(summary, settings, now = Date.now()) {
       '',
       `${bell(settings, d.name)} <b>${escapeHtml(d.name)}</b> · synced ${duration(now - Date.parse(d.reportedAt))} ago`,
       caps ? `${INDENT}🎯 Caps: ${caps}` : `${INDENT}⚠️ No cap set — add one on the dashboard (Devices → Set cap)`,
-      ...deviceWindowLines(summary, d.name),
+      ...deviceLines(summary, d.name),
     ];
   });
   const text = ['💻 <b>Devices</b>', `Tap a device to turn its alerts ${BELL_ON} on or ${BELL_OFF} off. You're told when it nears or reaches a cap.`, ...lines].join('\n');
@@ -196,7 +198,7 @@ export function helpView() {
     '💻 Devices — choose which devices send alerts',
     '🔔 Alerts — when to notify you',
     '❓ Help — this message',
-    '🧭 Used Claude Desktop, claude.ai or the Chrome extension? The bot asks which device it was, so caps stay right.',
+    '🧭 Claude Desktop, claude.ai and Chrome extension use counts for the device it was used on.',
     '',
     'Send /stop to unlink this chat.',
   ].join('\n');
@@ -219,7 +221,7 @@ const outsideAmounts = (windows) =>
     .join(' · ');
 
 /**
- * 🧭 Usage outside Claude Code: asks whose it was (one button per device), shows the chosen device, or —
+ * 🧭 Usage outside Claude Code, on request (🧭 Assign): asks whose it was (one button per device), shows the chosen device, or —
  * with `outcome` 'split' or 'expired' — closes the question.
  */
 export function outsideView(event, deviceNames, outcome = null) {
