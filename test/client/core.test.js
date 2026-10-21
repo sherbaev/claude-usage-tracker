@@ -133,10 +133,10 @@ test('computeShares gives a device with only outside usage its own row', () => {
   assert.equal(result.windows.fiveHour.find((r) => r.device === 'mac').sharePct, 7);
 });
 
-test('computeShares ignores outside usage of another window or a removed device', () => {
+test('computeShares ignores outside usage of another window; a removed device keeps it', () => {
   const reports = [report('mac', '2026-10-19T06:00:00Z', 3, 30, 12)];
   assert.equal(computeShares(reports, [outsideEvent(null, 4, '2026-10-19T03:00:00.000Z')]).windows.fiveHour[0].sharePct, 12);
-  assert.equal(computeShares(reports, [outsideEvent('gone', 4)]).windows.fiveHour[0].sharePct, 12);
+  assert.equal(computeShares(reports, [outsideEvent('gone', 4)]).windows.fiveHour[0].sharePct, 8, 'a removed device\'s outside usage is not Claude Code');
   assert.equal(computeShares(reports, [{ ...outsideEvent(null, 4), split: true }]).windows.fiveHour[0].sharePct, 12, 'split by usage');
 });
 
@@ -190,7 +190,6 @@ test('computeShares with a rate above what the plan shows scales every device do
 test('validateReport keeps when Claude Desktop, claude.ai and the Chrome extension were last used', () => {
   const body = { ...report('mac', '2026-10-21T19:15:00Z', 1, 2), surfaces: { desktop: '2026-10-21T19:10:00Z', web: 'nope', extension: '2030-01-01T00:00:00Z', other: '2026-10-21T19:00:00Z' } };
   assert.deepEqual(validateReport(body).surfaces, { desktop: '2026-10-21T19:10:00.000Z', web: null, extension: null });
-  assert.deepEqual(validateReport(report('mac', '2026-10-21T19:15:00Z', 1, 2)).surfaces, { desktop: null, web: null, extension: null });
 });
 
 test('computeShares with a rate counts "Not sure" usage as Claude Code, not as unassigned', () => {
@@ -200,4 +199,25 @@ test('computeShares with a rate counts "Not sure" usage as Claude Code, not as u
   const result = computeShares(reports, [split], { sevenDay: 0.043 });
   assert.ok(close(result.outside.sevenDay.unassignedPct, 0), String(result.outside.sevenDay.unassignedPct));
   assert.ok(close(result.windows.sevenDay.reduce((sum, r) => sum + r.sharePct, 0), 11));
+});
+
+test('computeShares with a rate: rounding-size leftovers are shared, a removed device keeps its outside usage', () => {
+  const reports = [weekly('other', '2026-10-21T12:12:00Z', 100, 9), weekly('mac', '2026-10-21T19:15:00Z', 100, 9)];
+  const small = computeShares(reports, [], { sevenDay: 0.043 }); // 9 − 8.6 = 0.4 points: rounding
+  assert.equal(small.outside.sevenDay.unassignedPct, 0);
+  assert.ok(close(small.windows.sevenDay.reduce((sum, r) => sum + r.sharePct, 0), 9));
+  const gone = { id: 'g', device: 'old-laptop', windows: { sevenDay: { pct: 2, resetsAt: '2026-10-27T17:00:00.000Z' } } };
+  const withGone = computeShares([weekly('mac', '2026-10-21T19:15:00Z', 100, 6.3)], [gone], { sevenDay: 0.043 });
+  assert.ok(close(withGone.outside.sevenDay.unassignedPct, 0), String(withGone.outside.sevenDay.unassignedPct));
+});
+
+test('computeShares with a rate and no Claude Code cost at all: everything is outside usage', () => {
+  const result = computeShares([weekly('mac', '2026-10-21T19:15:00Z', 0, 3)], [], { sevenDay: 0.043 });
+  assert.equal(result.outside.sevenDay.unassignedPct, 3);
+});
+
+test('validateReport: surfaces missing (unsupported) stays null; future times are dropped', () => {
+  assert.equal(validateReport(report('mac', '2026-10-21T19:15:00Z', 1, 2)).surfaces, null);
+  const future = { ...report('mac', '2099-01-01T00:00:00Z', 1, 2), surfaces: { desktop: '2098-12-31T23:59:00Z' } };
+  assert.deepEqual(validateReport(future).surfaces, { desktop: null, web: null, extension: null });
 });

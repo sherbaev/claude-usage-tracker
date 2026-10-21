@@ -38,6 +38,7 @@ test('surfaceActivity: nothing installed → all null', async () => {
   try {
     assert.deepEqual(await surfaceActivity({ home, platform: 'darwin' }), { desktop: null, web: null, extension: null });
     assert.deepEqual(await surfaceActivity({ home, platform: 'linux' }), { desktop: null, web: null, extension: null });
+    assert.equal(await surfaceActivity({ home, platform: 'win32' }), null);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

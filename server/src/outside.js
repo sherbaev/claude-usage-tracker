@@ -184,6 +184,8 @@ function unexplained(key, current, cost, rate, events, since, now, settleMs) {
  * surface used last, or null when none or several were.
  */
 function activeDevice(reports, from) {
+  // A device that does not report activity (old plugin, Windows, Safari only) might be the one: ask instead.
+  if (reports.some((r) => !r.surfaces)) return null;
   const active = reports
     .map((r) => {
       const [surface, at] = Object.entries(r.surfaces ?? {})
@@ -260,16 +262,23 @@ export function detectOutside(stored, reports, { now = Date.now(), newId = rando
   return { state: { ...next, events: added.events }, event: added.event, isNew: added.isNew };
 }
 
+/** Every event carries its 5h window (maybe at 0%), so its weekly part is tied to that 5h window. */
+const withFiveHour = (windows, account) =>
+  windows.fiveHour || !account.fiveHour ? windows : { fiveHour: { pct: 0, resetsAt: account.fiveHour.resetsAt }, ...windows };
+
 /**
  * Backfill with known amounts: puts `amounts` (% per window) on `device` in the current windows. Null when
  * an amount is not a number between 0 and the plan % of its window.
  */
 export function addOutside(state, reports, device, amounts, { now = Date.now(), newId = randomId } = {}) {
   const { account } = windowPools(reports);
-  const entries = Object.entries(amounts ?? {}).filter(([key]) => key in WINDOWS);
-  const isValid = entries.length && entries.every(([key, pct]) => account[key] && Number.isFinite(pct) && pct > 0 && pct <= account[key].pct);
+  const entries = Object.entries(amounts ?? {});
+  const room = (key) => account[key].pct - knownPct(state.events, key, account[key].resetsAt);
+  const isValid =
+    entries.length &&
+    entries.every(([key, pct]) => Object.hasOwn(WINDOWS, key) && account[key] && Number.isFinite(pct) && pct > 0 && pct <= room(key));
   if (!isValid) return null;
-  const windows = Object.fromEntries(entries.map(([key, pct]) => [key, { pct, resetsAt: account[key].resetsAt }]));
+  const windows = withFiveHour(Object.fromEntries(entries.map(([key, pct]) => [key, { pct, resetsAt: account[key].resetsAt }])), account);
   const event = { id: newId(), device, detectedAt: new Date(now).toISOString(), windows };
   return { state: { ...state, events: [...state.events, event].slice(-MAX_EVENTS) }, event };
 }
@@ -295,7 +304,7 @@ export function claimOutside(state, reports, device, { now = Date.now(), newId =
   if (!pending.length && !Object.keys(leftovers).length) return null;
   const events = state.events.map((e) => (pending.includes(e.id) ? { ...e, device, split: false } : e));
   if (!Object.keys(leftovers).length) return { state: { ...state, events }, event: null, assigned: pending.length };
-  const event = { id: newId(), device, detectedAt: new Date(now).toISOString(), windows: leftovers };
+  const event = { id: newId(), device, detectedAt: new Date(now).toISOString(), windows: withFiveHour(leftovers, account) };
   return { state: { ...state, events: [...events, event].slice(-MAX_EVENTS) }, event, assigned: pending.length };
 }
 
@@ -306,12 +315,17 @@ export const pendingEvents = (state, now = Date.now()) => state.events.filter((e
 export function assignEvent(state, id, device) {
   const found = state.events.find((e) => e.id === id);
   if (!found) return null;
-  const event = { ...found, device, split: false };
+  const { auto, ...rest } = found; // chosen by hand now
+  const event = { ...rest, device, split: false };
   return { state: { ...state, events: state.events.map((e) => (e.id === id ? event : e)) }, event };
 }
 
 /** "Not sure": split the usage across devices by their Claude Code usage. Kept, so it is not asked about again. */
 export function ignoreEvent(state, id) {
   if (!state.events.some((e) => e.id === id)) return null;
-  return { ...state, events: state.events.map((e) => (e.id === id ? { ...e, device: null, split: true } : e)) };
+  const split = (e) => {
+    const { auto, ...rest } = e;
+    return { ...rest, device: null, split: true };
+  };
+  return { ...state, events: state.events.map((e) => (e.id === id ? split(e) : e)) };
 }

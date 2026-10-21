@@ -306,7 +306,7 @@ test('outside usage is put on the device where Claude Desktop was just used, and
   const token = await ctx.register();
   const bot = await connected(ctx, token);
   await bot.link(111);
-  await ctx.call('POST', '/api/report', { token, body: report(10, { share: 20 }) });
+  await ctx.call('POST', '/api/report', { token, body: report(10, { share: 20, surfaces: {} }) }); // reports activity: none
   const desktop = { desktop: new Date().toISOString() };
   await ctx.call('POST', '/api/report', { token, body: report(14, { device: 'Home PC', share: 0, surfaces: desktop }) });
   const message = ctx.tg.of('sendMessage', 111).at(-1).params;

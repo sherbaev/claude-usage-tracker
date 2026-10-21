@@ -47,8 +47,14 @@ async function profiles(browserDir) {
 const iso = (ms) => (ms > 0 ? new Date(ms).toISOString() : null);
 const newestOf = async (dirs) => Math.max(0, ...(await Promise.all(dirs.map(newestWrite))));
 
-/** @returns {Promise<{ desktop: string|null, web: string|null, extension: string|null }>} ISO times of last use */
+const SUPPORTED = new Set(['darwin', 'linux']);
+
+/**
+ * @returns {Promise<{ desktop: string|null, web: string|null, extension: string|null }|null>} ISO times of last
+ * use; null where the folders are not known (Windows), so the server never mistakes it for "not used here"
+ */
 export async function surfaceActivity({ home = homedir(), platform = process.platform } = {}) {
+  if (!SUPPORTED.has(platform)) return null;
   const { desktop, browsers } = appDirs(home, platform);
   const allProfiles = (await Promise.all(browsers.map(profiles))).flat();
   const [desktopMs, webMs, extensionMs] = await Promise.all([

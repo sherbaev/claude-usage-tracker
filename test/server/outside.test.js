@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assignEvent, claimOutside, detectOutside, EMPTY_OUTSIDE, ignoreEvent, pendingEvents, planRates } from '../../server/src/outside.js';
+import { addOutside, assignEvent, claimOutside, detectOutside, EMPTY_OUTSIDE, ignoreEvent, pendingEvents, planRates } from '../../server/src/outside.js';
 
 const NOW = Date.parse('2026-10-19T10:00:00Z');
 const R5 = '2026-10-19T12:00:00.000Z';
@@ -278,7 +278,7 @@ const withSurfaces = (r, surfaces) => ({ ...r, surfaces: { desktop: null, web: n
 const recently = new Date(NOW - 10 * 60_000).toISOString();
 
 test('outside usage goes to the one device where Claude Desktop, claude.ai or the extension was just used', () => {
-  const pc = report('pc', 0, { five: 12, fiveCost: 0, week: 13, weekCost: 0, r5: RC });
+  const pc = withSurfaces(report('pc', 0, { five: 12, fiveCost: 0, week: 13, weekCost: 0, r5: RC }), {});
   const { event, isNew } = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: recently }), pc], at(0, { settleMs: 0 }));
   assert.equal(isNew, true);
   assert.equal(event.device, 'mac');
@@ -314,4 +314,27 @@ test('with both, the lower of the learned and the lowest-seen rate is used', () 
   const samples = { fiveHour: [{ pct: 30, cost: 100 }, { pct: 30, cost: 100 }], sevenDay: [] };
   const lows = { fiveHour: [{ resetsAt: R5, ratio: 0.25 }], sevenDay: [] };
   assert.equal(planRates({ ...EMPTY_OUTSIDE, samples, lows }).fiveHour, 0.25);
+});
+
+test('changing an automatic event by hand drops the "automatically" label', () => {
+  const auto = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: recently })], at(0, { settleMs: 0 }));
+  assert.equal(auto.event.auto, 'desktop');
+  assert.equal(assignEvent(auto.state, auto.event.id, 'pc').event.auto, undefined);
+  assert.equal(ignoreEvent(auto.state, auto.event.id).events.at(-1).auto, undefined);
+});
+
+test('no automatic assignment while any device does not report activity (old plugin, Windows, …)', () => {
+  const old = report('pc', 0, { five: 12, fiveCost: 0, week: 13, weekCost: 0, r5: RC }); // no surfaces at all
+  const result = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: recently }), old], at(0, { settleMs: 0 }));
+  assert.equal(result.event.device, null);
+});
+
+test('backfill events always carry the 5h window and cannot exceed what is left of the plan', () => {
+  const reports = [mac(12, 20, 13, 232, RC)];
+  const added = addOutside(learned(), reports, 'mac', { sevenDay: 1 }, at(0));
+  assert.deepEqual(added.event.windows.fiveHour, { pct: 0, resetsAt: RC });
+  assert.equal(addOutside(added.state, reports, 'mac', { sevenDay: 12.5 }, at(0)), null, 'only 12 of 13 points are left');
+  assert.equal(addOutside(added.state, reports, 'mac', { constructor: 1 }, at(0)), null);
+  const claimed = claimOutside(learned(), [mac(12, 20, 13, 232, RC)], 'mac', at(0));
+  assert.ok(claimed.event.windows.fiveHour);
 });

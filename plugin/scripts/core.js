@@ -80,6 +80,8 @@ function outsideUsage(events, key, accountWin, knownDevices) {
   const inThisWindow = events.filter((e) => e.windows?.[key] && sameWindow(e.windows[key].resetsAt, accountWin.resetsAt));
   // "Not sure" usage is treated as Claude Code: shared by cost.
   const splitPct = inThisWindow.filter((e) => e.split).reduce((sum, e) => sum + e.windows[key].pct, 0);
+  // Put on a device that has since been removed: still not Claude Code, just not shown on any device.
+  const removedPct = inThisWindow.filter((e) => !e.split && e.device && !knownDevices.has(e.device)).reduce((sum, e) => sum + e.windows[key].pct, 0);
   return inThisWindow
     .filter((e) => !e.split && (!e.device || knownDevices.has(e.device)))
     .reduce(
@@ -87,7 +89,7 @@ function outsideUsage(events, key, accountWin, knownDevices) {
         e.device
           ? { ...acc, assigned: { ...acc.assigned, [e.device]: (acc.assigned[e.device] ?? 0) + e.windows[key].pct } }
           : { ...acc, unassignedPct: acc.unassignedPct + e.windows[key].pct },
-      { assigned: {}, unassignedPct: 0, splitPct },
+      { assigned: {}, unassignedPct: 0, splitPct, removedPct },
     );
 }
 
@@ -98,14 +100,18 @@ function outsideUsage(events, key, accountWin, knownDevices) {
  * the Claude Code % is split by cost.
  */
 function codeSplit(codePct, totalCost, rate, splitPct) {
-  const expected = rate > 0 && totalCost > 0 ? rate * totalCost + splitPct : null;
-  if (expected === null || expected >= codePct) return { perDollar: totalCost > 0 ? codePct / totalCost : 0, residualPct: 0 };
+  const bySpend = { perDollar: totalCost > 0 ? codePct / totalCost : 0, residualPct: 0 };
+  if (!(rate > 0)) return bySpend;
+  if (totalCost <= 0) return { perDollar: 0, residualPct: Math.max(0, codePct - splitPct) }; // no Claude Code at all
+  const expected = rate * totalCost + splitPct;
+  // Less than whole-point rounding of the plan % is noise, shared by cost.
+  if (codePct - expected < ROUNDING_PCT) return bySpend;
   return { perDollar: expected / totalCost, residualPct: codePct - expected };
 }
 
 function windowRows(key, accountWin, inWindow, outside, reportedAt, rate) {
   const assignedTotal = Object.values(outside.assigned).reduce((sum, pct) => sum + pct, 0);
-  const codePct = Math.max(0, accountWin.pct - assignedTotal - outside.unassignedPct);
+  const codePct = Math.max(0, accountWin.pct - assignedTotal - outside.unassignedPct - (outside.removedPct ?? 0));
   const totalCost = inWindow.reduce((sum, r) => sum + r.local[key].costUSD, 0);
   const { perDollar, residualPct } = codeSplit(codePct, totalCost, rate, outside.splitPct ?? 0);
   const rows = inWindow.map((r) => {
@@ -155,6 +161,9 @@ const DEVICE_RE = /^[\w.\- ]{1,64}$/;
 
 export const isValidDeviceName = (name) => typeof name === 'string' && DEVICE_RE.test(name);
 
+// Anthropic reports plan % in whole points: a leftover below this is rounding, not outside usage.
+const ROUNDING_PCT = 0.5;
+
 // Upper bounds keep sums finite (Infinity serializes as null and breaks dashboards).
 const MAX_PCT = 1000;
 const MAX_COST_USD = 1e7;
@@ -178,8 +187,10 @@ function cleanLocalWindow(loc) {
 export const SURFACES = Object.freeze(['desktop', 'web', 'extension']);
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
+/** Null when the device does not report them (old plugin, unsupported system). */
 function cleanSurfaces(surfaces, reportedAt) {
-  const latest = Date.parse(reportedAt) + CLOCK_SKEW_MS;
+  if (surfaces == null || typeof surfaces !== 'object') return null;
+  const latest = Math.min(Date.parse(reportedAt), Date.now()) + CLOCK_SKEW_MS;
   return Object.fromEntries(
     SURFACES.map((name) => {
       const at = Date.parse(surfaces?.[name]);
