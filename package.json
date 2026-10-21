@@ -11,7 +11,7 @@
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage 'test/**/*.test.js'",
     "start": "node --disable-warning=ExperimentalWarning server/src/server.js",
-    "validate": "claude plugin validate . && claude plugin validate ./plugin"
+    "validate": "claude plugin validate . && claude plugin validate ./plugin && claude plugin validate ./pane"
   },
   "engines": {
     "node": ">=22.13"

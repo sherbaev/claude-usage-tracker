@@ -54,6 +54,81 @@ automatically while you use Claude Code.
 
 Needs Claude Code logged in with a Claude subscription (Pro / Max / Team, not an API key) and Node.js 18.17+.
 
+## Use it everywhere — VS Code, Claude Desktop, claude.ai, Chrome
+
+All Claude apps share one plan, so one tracker covers them all. Two plugins do the work:
+
+- **`usage-tracker`** reports each device's usage (Quick start above).
+- **`usage-tracker-pane`** shows the numbers inside Claude: a **Claude usage** pane beside the chat (account 5h /
+  weekly %, reset times, each device against its cap, usage not yet assigned, Codex), a status-line entry
+  (`Claude 5h 34% · week 71%`) and the `/plan-usage` command. It refreshes every minute and after each turn.
+
+| Where you use Claude | How its usage is tracked | Where you see it |
+|---|---|---|
+| **Claude Code** in the terminal | `usage-tracker` hooks, automatically | Pane + status line, `/usage-tracker:status` |
+| **VS Code** (Claude Code extension) | Same plugins as the terminal, automatically | Pane + status line in the Claude panel |
+| **JetBrains** (Claude Code plugin) | Same plugins as the terminal, automatically | Pane + status line in the IDE terminal |
+| **Claude Desktop**, Code tab | Same plugins as the terminal, automatically | Pane + status line |
+| **Claude Desktop** chat | Background reporting (step 3 below) | Pane, website, Telegram |
+| **claude.ai** in the browser | Background reporting (step 3 below) | Pane, website, Telegram |
+| **Claude in Chrome** (extension) | Background reporting (step 3 below) | Pane, website, Telegram |
+
+Plugins are installed per computer, not per app: the terminal, the VS Code and JetBrains extensions and Claude
+Desktop's Code tab all use the same Claude Code plugins, so install once on each computer.
+
+### Set it up on each computer
+
+1. **Install both plugins** in Claude Code (terminal, VS Code or Claude Desktop's Code tab):
+
+   ```text
+   /plugin marketplace add sherbaev/claude-usage-tracker
+   /plugin install usage-tracker@claude-usage-tracker
+   /plugin install usage-tracker-pane@claude-usage-tracker
+   ```
+
+2. **Connect the device** with your token from the [website](https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io)
+   (same token on every device, a different name for each):
+
+   ```text
+   /usage-tracker:setup https://0p2nwzsgdyic0rh1gboomqzi.178.105.41.164.sslip.io <your_token> Work MacBook
+   ```
+
+   The pane finds this connection by itself. Restart the app or run `/reload-plugins` if it doesn't appear.
+
+3. **Turn on background reporting** on the computer where you use Claude Desktop chat, claude.ai or the Chrome
+   extension:
+
+   ```text
+   /usage-tracker:background on
+   ```
+
+   That computer then reports every 5 minutes even when Claude Code is closed. Those apps leave no logs on your
+   computer, so their usage shows up as a rise in the plan % that Claude Code doesn't explain: the tracker shows it
+   as **🧭 Outside Claude Code** and the Telegram bot asks which device it belongs to
+   ([details](#usage-outside-claude-code)). Built in on macOS; elsewhere the command prints a crontab line to add.
+   Open Claude Code on that computer at least once a day so its Claude login stays fresh.
+
+Without Claude Code in a terminal, the same steps work from a shell with Node.js 18.17+ (handy for testing or a
+machine you manage over SSH):
+
+```sh
+git clone https://github.com/sherbaev/claude-usage-tracker ~/.usage-tracker
+node ~/.usage-tracker/plugin/scripts/cli.js setup --server <server-url> --token <your_token> --device "Work MacBook"
+node ~/.usage-tracker/plugin/scripts/cli.js background on
+```
+
+### The pane
+
+| Command | What it does |
+|---|---|
+| `/plan-usage` | Opens the pane, refreshes it and prints the account % |
+| `/plan-usage connect <server-url> <token>` | Connects the pane where `/usage-tracker:setup` hasn't run, e.g. a cloud session |
+| `/plan-usage disconnect` | Forgets a server saved with `connect` |
+
+It only reads `/api/summary` from your server; it never reports anything itself. The server URL and token can also
+be set in the plugin's settings. In cloud sessions (claude.ai's Code, scheduled tasks) the pane works only if the
+environment's network allows your server's address.
+
 ## Commands
 
 | Command | What it does |

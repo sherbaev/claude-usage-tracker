@@ -38,6 +38,27 @@
         "limits",
         "multi-device"
       ]
+    },
+    {
+      "name": "usage-tracker-pane",
+      "source": "./pane",
+      "version": "0.1.0",
+      "description": "Claude plan usage for every device inside the Claude app: a live pane beside the chat, a status-line entry and /plan-usage. Reads your tracker server.",
+      "category": "productivity",
+      "homepage": "https://github.com/sherbaev/claude-usage-tracker",
+      "keywords": [
+        "claude",
+        "claude-desktop",
+        "usage-tracker",
+        "usage-limits",
+        "pane",
+        "status-line"
+      ],
+      "tags": [
+        "usage",
+        "limits",
+        "desktop"
+      ]
     }
   ]
 }
