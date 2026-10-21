@@ -137,6 +137,7 @@ test('computeShares ignores outside usage of another window or a removed device'
   const reports = [report('mac', '2026-10-19T06:00:00Z', 3, 30, 12)];
   assert.equal(computeShares(reports, [outsideEvent(null, 4, '2026-10-19T03:00:00.000Z')]).windows.fiveHour[0].sharePct, 12);
   assert.equal(computeShares(reports, [outsideEvent('gone', 4)]).windows.fiveHour[0].sharePct, 12);
+  assert.equal(computeShares(reports, [{ ...outsideEvent(null, 4), split: true }]).windows.fiveHour[0].sharePct, 12, 'split by usage');
 });
 
 test('validateReport keeps cleaned agent usage', () => {

@@ -267,7 +267,7 @@ test('usage outside Claude Code: the bot asks whose it was and the answer moves 
   assert.equal(row(s, 'Home PC').outsidePct, 0);
   assert.equal(row(s, 'Work Mac').sharePct + row(s, 'Home PC').sharePct, 16);
 
-  await bot.tap(111, buttons[1].callback_data);
+  await bot.tap(111, 'o:deadbeef:x');
   assert.match(ctx.tg.of('editMessageText', 111).at(-1).params.text, /Already answered/);
 
   // A later unanswered rise: 📊 Usage shows it with an Assign button that re-asks.

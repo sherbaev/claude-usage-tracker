@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assignEvent, detectOutside, EMPTY_OUTSIDE, ignoreEvent, pendingEvents } from '../../server/src/outside.js';
+import { assignEvent, detectOutside, EMPTY_OUTSIDE, ignoreEvent, pendingEvents, planRates } from '../../server/src/outside.js';
 
 const NOW = Date.parse('2026-10-19T10:00:00Z');
 const R5 = '2026-10-19T12:00:00.000Z';
@@ -87,17 +87,23 @@ test('assign, re-assign and ignore', () => {
   state = assignEvent(state, event.id, 'pc').state;
   assert.equal(state.events[0].device, 'pc');
   assert.equal(assignEvent(state, 'nope', 'pc'), null);
-  assert.deepEqual(ignoreEvent(state, event.id).events, []);
+  const split = ignoreEvent(state, event.id);
+  assert.equal(split.events[0].split, true, 'kept, so the same usage is not asked about again');
+  assert.deepEqual(pendingEvents(split, NOW), []);
+  assert.equal(assignEvent(split, event.id, 'mac').event.split, false, 'a split can still be changed to a device');
   assert.equal(ignoreEvent(state, 'nope'), null);
 });
 
-test('events are dropped once all their windows have reset', () => {
+test('events are dropped once their windows have reset and newer windows have been seen', () => {
   let state = detect(EMPTY_OUTSIDE, [report('mac', 30, { five: 10 })]).state;
   state = detect(state, [report('mac', 0, { five: 15 })]).state;
   const later = Date.parse(RW) + 1;
-  const after = detectOutside(state, [], { now: later, newId });
-  assert.deepEqual(after.state.events, []);
-  assert.deepEqual(pendingEvents(state, later), []);
+  assert.deepEqual(pendingEvents(state, later), [], 'no longer asked about');
+  assert.equal(detectOutside(state, [], { now: later, newId }).state.events.length, 1, 'kept until it is learned from');
+  const next = { device: 'mac', reportedAt: new Date(later).toISOString(),
+    account: { fiveHour: { pct: 1, resetsAt: '2026-10-23T01:00:00.000Z' }, sevenDay: { pct: 1, resetsAt: '2026-10-29T20:00:00.000Z' } },
+    local: { fiveHour: { costUSD: 1, tokens: 1 }, sevenDay: { costUSD: 1, tokens: 1 } } };
+  assert.deepEqual(detectOutside(state, [next], { now: later, newId }).state.events, []);
 });
 
 test('ignores reports without Claude data and stale snapshots', () => {
@@ -148,4 +154,100 @@ test('pendingEvents lists every unanswered event still in its window', () => {
   state = detect(state, [report('mac', 0, { five: 5, fiveCost: 0, r5: '2026-10-19T17:00:00.000Z' })]).state;
   assert.equal(pendingEvents(state, NOW).length, 2);
   assert.equal(pendingEvents(assignEvent(state, state.events[0].id, 'mac').state, NOW).length, 1);
+});
+
+// ---- learned rate: plan % per $ of Claude Code, from finished windows ----
+const RB = '2026-10-19T17:00:00.000Z';
+const RC = '2026-10-19T22:00:00.000Z';
+const mac = (five, fiveCost, week, weekCost, r5) => report('mac', 0, { five, fiveCost, week, weekCost, r5 });
+const at = (minutes, extra = {}) => ({ now: NOW + minutes * 60_000, newId, ...extra });
+
+/** Two finished 5h windows at 0.25 %/$ (5h) and 0.05 %/$ (weekly); now early in a third one. */
+function learned() {
+  return [
+    mac(2, 8, 5, 100, R5),
+    mac(10, 40, 6.6, 132, R5),
+    mac(1, 4, 6.8, 136, RB),
+    mac(20, 80, 10.6, 212, RB),
+    mac(1, 4, 10.8, 216, RC),
+  ].reduce((state, r) => detectOutside(state, [r], at(0, { settleMs: 0 })).state, EMPTY_OUTSIDE);
+}
+
+test('learns how much plan % a dollar of Claude Code uses from finished windows', () => {
+  assert.deepEqual(planRates(EMPTY_OUTSIDE), { fiveHour: null, sevenDay: null });
+  const rates = planRates(learned());
+  assert.equal(rates.fiveHour, 0.25);
+  assert.ok(Math.abs(rates.sevenDay - 0.05) < 1e-9, String(rates.sevenDay));
+});
+
+test('a window with much more % per dollar than usual (outside usage) does not skew the rate', () => {
+  const samples = { fiveHour: [{ pct: 10, cost: 40 }, { pct: 20, cost: 80 }, { pct: 40, cost: 40 }], sevenDay: [] };
+  assert.equal(planRates({ ...EMPTY_OUTSIDE, samples }).fiveHour, 0.25);
+});
+
+test('usage outside Claude Code is found while Claude Code is also running', () => {
+  const { event } = detectOutside(learned(), [mac(12, 20, 13, 232, RC)], at(0, { settleMs: 0 }));
+  assert.equal(event.windows.fiveHour.pct, 7);
+  assert.ok(Math.abs(event.windows.sevenDay.pct - 1.4) < 1e-9, String(event.windows.sevenDay.pct));
+});
+
+test('a rise that Claude Code cost explains at the learned rate is not asked about', () => {
+  assert.equal(detectOutside(learned(), [mac(6, 24, 12, 236, RC)], at(0, { settleMs: 0 })).event, null);
+});
+
+test('Claude Desktop first, then a Claude Code session: still asked once the rise has settled', () => {
+  let result = detectOutside(learned(), [mac(9, 4, 12.8, 216, RC)], at(1)); // session start, before any Claude Code
+  assert.equal(result.event, null, 'waits for other devices to report');
+  result = detectOutside(result.state, [mac(11, 12, 13.2, 224, RC)], at(8)); // Claude Code has run since
+  assert.equal(result.event.windows.fiveHour.pct, 8);
+});
+
+test('with a learned rate, a device reporting its Claude Code cost late is not outside usage', () => {
+  const pc = (cost) => report('pc', 0, { five: 9, fiveCost: cost, week: 12.4, weekCost: 216 + cost, r5: RC });
+  let result = detectOutside(learned(), [mac(9, 4, 12.4, 216, RC), pc(0)], at(1));
+  result = detectOutside(result.state, [mac(9, 4, 12.4, 216, RC), pc(32)], at(4));
+  result = detectOutside(result.state, [mac(9, 4, 12.4, 216, RC), pc(32)], at(12));
+  assert.equal(result.event, null);
+});
+
+test('usage split by Claude Code usage is not asked about again', () => {
+  const first = detectOutside(learned(), [mac(12, 20, 13, 232, RC)], at(0, { settleMs: 0 }));
+  const split = ignoreEvent(first.state, first.event.id);
+  assert.equal(detectOutside(split, [mac(12, 20, 13, 232, RC)], at(1, { settleMs: 0 })).event, null);
+});
+
+test('outside usage confirmed for a device is taken out of the finished window before learning from it', () => {
+  // Two clean windows at 0.25 %/$, then a window with 2 points of Desktop use the user assigned.
+  let state = learned();
+  const found = detectOutside(state, [mac(5, 12, 11.2, 224, RC)], at(0, { settleMs: 0 })); // 2 points over; weekly fully explained
+  assert.deepEqual(Object.keys(found.event.windows), ['fiveHour']);
+  state = assignEvent(found.state, found.event.id, 'mac').state;
+  // A late report still from the old window, after it reset, then the next window.
+  const afterReset = { now: Date.parse(RC) + 60_000, newId, settleMs: 0 };
+  state = detectOutside(state, [mac(5, 12, 11.2, 224, RC)], afterReset).state;
+  state = detectOutside(state, [mac(1, 4, 13.4, 228, '2026-10-20T03:00:00.000Z')], afterReset).state;
+  assert.equal(planRates(state).fiveHour, 0.25, 'the 2 Desktop points are not learned as Claude Code');
+});
+
+test('"Not sure" usage is learned as Claude Code', () => {
+  const found = detectOutside(learned(), [mac(5, 12, 11.2, 224, RC)], at(0, { settleMs: 0 }));
+  let state = ignoreEvent(found.state, found.event.id);
+  const later = { now: Date.parse(RC) + 60_000, newId, settleMs: 0 };
+  state = detectOutside(state, [mac(1, 4, 13.4, 228, '2026-10-20T03:00:00.000Z')], later).state;
+  assert.ok(planRates(state).fiveHour > 0.25);
+});
+
+test('the settle wait starts over in a new window', () => {
+  let result = detectOutside(learned(), [mac(9, 4, 12.8, 216, RC)], at(1)); // over, waiting
+  const nextReset = '2026-10-20T03:00:00.000Z';
+  result = detectOutside(result.state, [mac(9, 4, 13, 216, nextReset)], at(400));
+  assert.equal(result.event, null, 'a new window waits again');
+});
+
+test('a device joining the weekly window mid-way does not skew the weekly rate', () => {
+  let state = learned();
+  const pc = (cost, r5) => report('pc', 0, { five: 1, fiveCost: 0, week: 11, weekCost: cost, r5 });
+  state = detectOutside(state, [mac(2, 8, 12.5, 224, RC), pc(400, RC)], at(0, { settleMs: 0 })).state; // pc brings a week of cost
+  state = detectOutside(state, [mac(1, 4, 12.6, 228, '2026-10-20T03:00:00.000Z'), pc(400, RC)], at(0, { settleMs: 0 })).state;
+  assert.ok(Math.abs(planRates(state).sevenDay - 0.05) < 1e-9, String(planRates(state).sevenDay));
 });
