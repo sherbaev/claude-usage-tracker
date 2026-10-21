@@ -230,7 +230,7 @@ test('on start, bots connected before buttons existed are switched to receive bu
   assert.deepEqual(second.tg.of('setMyCommands').at(-1)?.params.commands.map((c) => c.command), ['start']);
 });
 
-test('usage outside Claude Code: the bot asks whose it was and the answer moves the share', async () => {
+test('usage outside Claude Code nobody can place: shown in 📊 Usage, no message; 🧭 Assign asks and the answer moves the share', async () => {
   const ctx = await boot();
   const token = await ctx.register();
   const bot = await connected(ctx, token);
@@ -240,8 +240,15 @@ test('usage outside Claude Code: the bot asks whose it was and the answer moves 
   const summary = async () => (await ctx.call('GET', '/api/summary', { token })).json.data;
   const row = (s, device) => s.windows.fiveHour.find((r) => r.device === device);
 
-  // The plan went up 6 points while no device's Claude Code cost moved (Claude Desktop, claude.ai, …).
+  // The plan went up 6 points while no device's Claude Code cost moved, and no device reports Desktop activity.
+  const sentBefore = ctx.tg.sent(111).length;
   await ctx.call('POST', '/api/report', { token, body: report(16) });
+  assert.equal(ctx.tg.sent(111).length, sentBefore, 'no "whose was it" message');
+  await bot.send(111, '📊 Usage');
+  const usage = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.match(usage.text, /not assigned/);
+  assert.ok(usage.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === 'o:ask'));
+  await bot.tap(111, 'o:ask');
   const question = ctx.tg.of('sendMessage', 111).at(-1).params;
   assert.match(question.text, /🧭 <b>Usage outside Claude Code<\/b>/);
   assert.match(question.text, /5h \+6\.0%/);
@@ -270,16 +277,6 @@ test('usage outside Claude Code: the bot asks whose it was and the answer moves 
 
   await bot.tap(111, 'o:deadbeef:x');
   assert.match(ctx.tg.of('editMessageText', 111).at(-1).params.text, /Already answered/);
-
-  // A later unanswered rise: 📊 Usage shows it with an Assign button that re-asks.
-  await ctx.call('POST', '/api/report', { token, body: report(20) });
-  await bot.send(111, '📊 Usage');
-  const usage = ctx.tg.of('sendMessage', 111).at(-1).params;
-  assert.match(usage.text, /not assigned/);
-  const sentBefore = ctx.tg.sent(111).length;
-  await bot.tap(111, 'o:ask');
-  assert.equal(ctx.tg.sent(111).length, sentBefore + 1);
-  assert.match(ctx.tg.sent(111).at(-1), /Whose was it\?/);
 });
 
 test('backfill: unanswered outside usage goes to a device through the API; GET /api/outside shows the rate', async () => {
@@ -301,17 +298,16 @@ test('backfill: unanswered outside usage goes to a device through the API; GET /
   assert.equal((await ctx.call('GET', '/api/outside')).status, 401);
 });
 
-test('outside usage is put on the device where Claude Desktop was just used, and the bot says so', async () => {
+test('outside usage is put on the device where Claude Desktop was just used, without a message', async () => {
   const ctx = await boot();
   const token = await ctx.register();
   const bot = await connected(ctx, token);
   await bot.link(111);
   await ctx.call('POST', '/api/report', { token, body: report(10, { share: 20, surfaces: {} }) }); // reports activity: none
   const desktop = { desktop: new Date().toISOString() };
+  const sentBefore = ctx.tg.sent(111).length;
   await ctx.call('POST', '/api/report', { token, body: report(14, { device: 'Home PC', share: 0, surfaces: desktop }) });
-  const message = ctx.tg.of('sendMessage', 111).at(-1).params;
-  assert.match(message.text, /Counted for <b>Home PC<\/b> automatically — Claude Desktop was used there/);
-  assert.ok(message.reply_markup.inline_keyboard.flat().some((b) => b.text === '✅ Home PC'), 'can still be changed');
+  assert.equal(ctx.tg.sent(111).length, sentBefore);
   const s = (await ctx.call('GET', '/api/summary', { token })).json.data;
   assert.equal(s.windows.fiveHour.find((r) => r.device === 'Home PC').outsidePct, 4);
 });

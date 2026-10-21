@@ -103,9 +103,9 @@ Desktop's Code tab all use the same Claude Code plugins, so install once on each
    ```
 
    That computer then reports every 5 minutes even when Claude Code is closed. Those apps leave no logs on your
-   computer, so their usage shows up as a rise in the plan % that Claude Code doesn't explain: the tracker shows it
-   as **🧭 Outside Claude Code** and the Telegram bot asks which device it belongs to
-   ([details](#usage-outside-claude-code)). Built in on macOS; elsewhere the command prints a crontab line to add.
+   computer, so their usage shows up as a rise in the plan % that Claude Code doesn't explain. The tracker counts it
+   for the device where they were used (`🧭 incl. … Desktop / web`)
+   ([details](#claude-desktop-claudeai-and-the-chrome-extension)). Built in on macOS; elsewhere the command prints a crontab line to add.
    Open Claude Code on that computer at least once a day so its Claude login stays fresh.
 
 Without Claude Code in a terminal, the same steps work from a shell with Node.js 18.17+ (handy for testing or a
@@ -172,6 +172,7 @@ so there are no commands to remember.
 💻 Devices · share of the plan
 🔔 Work MacBook
       ⏱ 5h  🟩⬜⬜⬜⬜ 9.0% of 50% cap
+            🧭 incl. 2.5% Desktop / web
       📅 Weekly  🟨🟨🟨⬜⬜ 29% of 50% cap
 🔕 Home PC
       📅 Weekly  🟥🟥🟥🟥🟥 46% of 50% cap
@@ -196,7 +197,7 @@ so there are no commands to remember.
 
 | Button | What it shows |
 |---|---|
-| 📊 **Usage** | Claude 5-hour and weekly usage as bars, each device against its cap (🟩 fine · 🟨 getting close · 🟥 at the cap · ⛔ over), usage outside Claude Code not yet assigned (🧭), Codex and other agents. 🔄 Refresh updates it in place |
+| 📊 **Usage** | Claude 5-hour and weekly usage as bars, each device against its cap (🟩 fine · 🟨 getting close · 🟥 at the cap · ⛔ over), how much came from Claude Desktop, claude.ai or the Chrome extension (🧭), Codex and other agents. 🔄 Refresh updates it in place |
 | 💻 **Devices** | Every device with its caps and when it last synced. Tap a device's **🔔 / 🔕** button to turn its alerts on or off |
 | 🔔 **Alerts** | Alerts on or off, near-limit level (70 / 80 / 90%), limit reached, Codex limits |
 | ❓ **Help** | What each button does. Send `/stop` to unlink a chat |
@@ -210,44 +211,30 @@ so there are no commands to remember.
 - Each alert is sent once per window. Alerts are checked when a device reports, about every 5 minutes while you use
   Claude Code.
 
-### Usage outside Claude Code
+### Claude Desktop, claude.ai and the Chrome extension
 
-Claude Desktop, claude.ai and the Chrome extension use the same plan, but they leave no logs on your devices. When
-the plan goes up more than your devices' Claude Code usage explains, the bot asks whose it was:
+They use the same plan as Claude Code but leave no logs on your devices. The tracker still counts them for the
+right device, with no questions:
 
-```text
-🧭 Usage outside Claude Code
-Your plan went up more than your devices' Claude Code explains — likely Claude Desktop, claude.ai or the Chrome extension.
-⏱ 5h +8.0% · 📅 Weekly +3.0%
-
-👉 Whose was it? It then counts toward that device's share and caps.
-[ 💻 MacBook Pro ]
-[ 💻 Work PC ]
-[ 🙈 Not sure — split by usage ]
-```
-
-- Tap a device and the usage counts toward that device's share and caps, so its alerts and blocking stay accurate.
-  Tap another device to change your answer.
-- **🙈 Not sure** splits it across devices by their Claude Code usage, and it isn't asked about again.
-- Until you answer, the usage is shown on its own (`🧭 Outside Claude Code … not assigned` in 📊 Usage, and on the
-  dashboard) instead of being added to your devices. **🧭 Assign outside usage** asks again.
-- **How it's found:** the server learns how much plan % a dollar of Claude Code uses on your account: from the
-  lowest % per dollar it has seen (right away), then from finished 5-hour windows. Each device gets only the %
-  its own Claude Code explains, so a device you aren't using doesn't grow. Plan % beyond that is outside usage,
-  even while Claude Code is running at the same time.
-- **Which device:** if Claude Desktop, claude.ai or the Claude Chrome extension was used on exactly one device
-  around that time, the usage is put on that device automatically and the bot tells you (tap another device to
-  change it). Otherwise the bot asks. **🧭 Assign outside usage** also asks about smaller amounts that haven't
-  reached the threshold yet.
-- It's an estimate. Anthropic doesn't say which app used the plan, and the learned rate varies a little with the
-  models you use. Amounts under about 20% of your Claude Code usage, or under 2 points (5-hour) / 1 point (weekly),
-  are treated as noise and add up until they're large enough to ask about.
-- Usage is checked when a device reports. The bot waits 6 minutes so a device whose Claude Code report is still on
-  its way isn't mistaken for Desktop use.
-- **Turn on background reporting** with `/usage-tracker:background on` on the Mac where you use Claude Desktop or
-  the browser. Devices otherwise report only while Claude Code runs, so the server doesn't see Desktop use until
-  Claude Code next runs. Usage from a window that has already reset is never seen. Background reporting uses the
-  Claude login that Claude Code keeps fresh, so open Claude Code at least once a day.
+- **How much:** the server learns how much plan % a dollar of Claude Code uses on your account, from the lowest
+  % per dollar it has seen and from finished 5-hour windows. Each device gets only the % its own Claude Code
+  explains, so a device you aren't using doesn't grow. Plan % beyond that came from Desktop, claude.ai or the
+  extension, even while Claude Code runs at the same time.
+- **Which device:** every report says when Claude Desktop, claude.ai (Chrome, Brave, Edge, Arc, Vivaldi) and the
+  Claude Chrome extension were last used on that device. The usage goes to the device where one of them was used
+  most recently. It then counts toward that device's share and caps, so alerts and blocking stay accurate, and
+  📊 Usage shows it as `🧭 incl. 2.5% Desktop / web` under the device.
+- If no device reports any activity (Windows, Safari or Firefox only, or an older plugin), the usage is shown as
+  `🧭 Desktop / web, not assigned` in 📊 Usage instead of being added to your devices. Tap
+  **🧭 Assign outside usage** to put it on a device, or **🙈 Not sure** to split it by Claude Code usage.
+- **Turn on background reporting** with `/usage-tracker:background on` on each Mac where you use Claude Desktop or
+  the browser. Devices otherwise report only while Claude Code runs, so Desktop use isn't seen until Claude Code
+  next runs, and usage in a window that resets before then is lost. Background reporting uses the Claude login
+  that Claude Code keeps fresh, so open Claude Code at least once a day.
+- It's an estimate. Anthropic reports whole percentages and doesn't say which app used the plan, so amounts can
+  be off by about a point. Small amounts (under 2 points of the 5-hour window, 1 point of the weekly, or about
+  20% of your Claude Code usage) add up until they're large enough to count. The server waits 6 minutes so a
+  device whose Claude Code report is still on its way isn't mistaken for Desktop use.
 
 The bot only answers chats you linked. Bot tokens are stored encrypted on your server.
 

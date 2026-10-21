@@ -158,9 +158,8 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     const outside = detectOutside(outsideState(user.id), db.listReports(user.id), { settleMs: outsideSettleMs });
     db.setOutsideState(user.id, outside.state);
     const { summary, limits } = limitedSummary(user);
+    // Outside usage is put on a device from its activity, without a message; what can't be placed shows in 📊 Usage.
     await tg.notify(user, summary).catch((error) => log(`telegram alerts failed: ${error.message}`));
-    // Only a new event is announced; growth of an unanswered one shows in 📊 Usage and when it is answered.
-    if (outside.isNew) await tg.askOutside(user, outside.event).catch((error) => log(`telegram outside-usage question failed: ${error.message}`));
     return { device: clean.device, status: deviceStatus(summary, clean.device, limits[clean.device]) };
   }
 

@@ -112,8 +112,9 @@ test('usageView: outside Claude Code usage — unassigned total with an Assign b
     outside: { fiveHour: { unassignedPct: 3 }, sevenDay: { unassignedPct: 1 } },
   };
   const view = usageView(withOutside, subscribed('Work Mac'), NOW);
-  assert.match(view.text, /🧭 Outside Claude Code: 5h 3\.0% · weekly 1\.0% — <b>not assigned<\/b>/);
-  assert.match(view.text, /⏱ 5h\s+.*40% of 50% cap · 🧭 6\.0% outside Claude Code/);
+  assert.match(view.text, /🧭 Desktop \/ web, not assigned: 5h 3\.0% · weekly 1\.0%/);
+  // The outside part sits on its own short line under the window, so nothing wraps mid-phrase.
+  assert.match(view.text, /⏱ 5h\s+(🟩|🟨|🟥)+⬜* 40% of 50% cap\n {12}🧭 incl\. 6\.0% Desktop \/ web\n/);
   assert.deepEqual(view.reply_markup.inline_keyboard.flat().map((b) => b.callback_data), ['u:refresh', 'd:show', 'o:ask']);
   const none = usageView({ ...base, outside: { fiveHour: { unassignedPct: 0 }, sevenDay: { unassignedPct: 0 } } }, DEFAULT_ALERTS, NOW);
   assert.doesNotMatch(none.text, /🧭/);

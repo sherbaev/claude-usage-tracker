@@ -1,6 +1,6 @@
 // Telegram integration: each account connects its own bot from the dashboard. The server configures the
 // bot (name, picture, menu, webhook), links chats with one-time codes, answers the button keyboard and
-// inline buttons, sends near-limit / limit-hit alerts after reports, and asks whose usage outside Claude Code was.
+// inline buttons, sends near-limit / limit-hit alerts after reports, and on request asks whose usage outside Claude Code was.
 import { randomBytes } from 'node:crypto';
 import { safeEqual } from '../auth.js';
 import { HttpError } from '../http.js';
@@ -351,15 +351,6 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
     await Promise.all(chats.map((c) => send(bot, c.id, message)));
   }
 
-  /** After a report that found usage outside Claude Code: ask the linked chats whose it was. */
-  async function askOutside(user, event) {
-    const bot = db.getBot(user.id);
-    const chats = bot ? db.listChats(user.id) : [];
-    if (!chats.length) return;
-    const message = outsideView(event, deviceNames(user.id));
-    await Promise.all(chats.map((c) => send(bot, c.id, message)));
-  }
-
   /** Bots connected before inline buttons existed only receive messages: also subscribe them to button taps. */
   async function upgradeWebhooks() {
     for (const bot of db.listBots()) {
@@ -375,5 +366,5 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
     }
   }
 
-  return { status, connect, disconnect, createLink, unlinkChat, setAlerts, sendTest, handleWebhook, notify, askOutside, upgradeWebhooks };
+  return { status, connect, disconnect, createLink, unlinkChat, setAlerts, sendTest, handleWebhook, notify, upgradeWebhooks };
 }

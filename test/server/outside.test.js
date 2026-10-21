@@ -285,13 +285,16 @@ test('outside usage goes to the one device where Claude Desktop, claude.ai or th
   assert.equal(event.auto, 'desktop');
 });
 
-test('with activity on two devices, or none, the bot asks', () => {
+test('several active devices: the one used most recently; none just now: the one used last; no activity known: unassigned', () => {
   const pc = (surfaces) => withSurfaces(report('pc', 0, { five: 12, fiveCost: 0, week: 13, weekCost: 0, r5: RC }), surfaces);
-  const both = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: recently }), pc({ web: recently })], at(0, { settleMs: 0 }));
-  assert.equal(both.event.device, null);
-  const old = new Date(NOW - 5 * 60 * 60_000).toISOString();
-  const none = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: old }), pc({})], at(0, { settleMs: 0 }));
-  assert.equal(none.event.device, null);
+  const latest = new Date(NOW - 2 * 60_000).toISOString();
+  const both = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: recently }), pc({ web: latest })], at(0, { settleMs: 0 }));
+  assert.deepEqual([both.event.device, both.event.auto], ['pc', 'web']);
+  const hours = (h) => new Date(NOW - h * 60 * 60_000).toISOString();
+  const stale = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: hours(5) }), pc({ extension: hours(9) })], at(0, { settleMs: 0 }));
+  assert.deepEqual([stale.event.device, stale.event.auto], ['mac', 'desktop']);
+  const unknown = detectOutside(learned(), [mac(12, 20, 13, 232, RC), report('pc', 0, { five: 12, fiveCost: 0, week: 13, weekCost: 0, r5: RC })], at(0, { settleMs: 0 }));
+  assert.equal(unknown.event.device, null);
 });
 
 test('more outside usage on the same device is added quietly to its automatic event', () => {
@@ -323,10 +326,10 @@ test('changing an automatic event by hand drops the "automatically" label', () =
   assert.equal(ignoreEvent(auto.state, auto.event.id).events.at(-1).auto, undefined);
 });
 
-test('no automatic assignment while any device does not report activity (old plugin, Windows, …)', () => {
+test('a device that does not report activity (old plugin, Windows) does not stop the assignment', () => {
   const old = report('pc', 0, { five: 12, fiveCost: 0, week: 13, weekCost: 0, r5: RC }); // no surfaces at all
   const result = detectOutside(learned(), [withSurfaces(mac(12, 20, 13, 232, RC), { desktop: recently }), old], at(0, { settleMs: 0 }));
-  assert.equal(result.event.device, null);
+  assert.equal(result.event.device, 'mac');
 });
 
 test('backfill events always carry the 5h window and cannot exceed what is left of the plan', () => {

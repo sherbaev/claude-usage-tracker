@@ -2,8 +2,9 @@
 // local logs, only in the account's plan %. Once finished windows have taught us how much plan % a dollar of
 // Claude Code uses, any % that the devices' Claude Code cost does not explain is outside usage — even while
 // Claude Code is running. Before that, only a rise with no Claude Code cost at all counts. Each finding
-// becomes an event: when reports show Claude Desktop, claude.ai or the Claude extension was just used on exactly
-// one device, it is put on that device; otherwise the Telegram bot asks. Pure: the caller stores `state`.
+// becomes an event put on the device where Claude Desktop, claude.ai or the Claude extension was used (from
+// each report's activity times); only when no device reports any activity is it left unassigned. Pure: the
+// caller stores `state`.
 import { randomBytes } from 'node:crypto';
 import { sameWindow, WINDOWS, windowPools } from '../../plugin/scripts/core.js';
 
@@ -180,21 +181,15 @@ function unexplained(key, current, cost, rate, events, since, now, settleMs) {
 }
 
 /**
- * The one device where Claude Desktop, claude.ai or the Claude extension was used since `from`, with the
- * surface used last, or null when none or several were.
+ * Where the outside usage most likely came from: the device whose Claude Desktop, claude.ai or Claude extension
+ * was used most recently — preferring use since `from` — with that surface. Null when no device reports any.
  */
-function activeDevice(reports, from) {
-  // A device that does not report activity (old plugin, Windows, Safari only) might be the one: ask instead.
-  if (reports.some((r) => !r.surfaces)) return null;
-  const active = reports
-    .map((r) => {
-      const [surface, at] = Object.entries(r.surfaces ?? {})
-        .filter(([, iso]) => iso && Date.parse(iso) >= from)
-        .sort(([, a], [, b]) => Date.parse(b) - Date.parse(a))[0] ?? [];
-      return surface ? { device: r.device, surface, at } : null;
-    })
-    .filter(Boolean);
-  return active.length === 1 ? active[0] : null;
+function likelyDevice(reports, from) {
+  const lastUse = reports
+    .flatMap((r) => Object.entries(r.surfaces ?? {}).map(([surface, iso]) => ({ device: r.device, surface, at: Date.parse(iso) })))
+    .filter((u) => Number.isFinite(u.at))
+    .sort((a, b) => b.at - a.at);
+  return lastUse.find((u) => u.at >= from) ?? lastUse[0] ?? null;
 }
 
 /** When the unexplained rise began: the earliest settle start among the windows, else now. */
@@ -257,7 +252,7 @@ export function detectOutside(stored, reports, { now = Date.now(), newId = rando
       .filter(([key, f]) => isAsked(f) || key === 'fiveHour')
       .map(([key, f]) => [key, { pct: isAsked(f) ? f.amount : 0, resetsAt: account[key].resetsAt }]),
   );
-  const auto = activeDevice(reports, riseStart(findings, now) - ACTIVITY_LOOKBACK_MS);
+  const auto = likelyDevice(reports, riseStart(findings, now) - ACTIVITY_LOOKBACK_MS);
   const added = addEvent(events, windows, new Date(now).toISOString(), newId, auto);
   return { state: { ...next, events: added.events }, event: added.event, isNew: added.isNew };
 }
