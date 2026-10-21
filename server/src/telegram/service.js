@@ -4,7 +4,7 @@
 import { randomBytes } from 'node:crypto';
 import { safeEqual } from '../auth.js';
 import { HttpError } from '../http.js';
-import { assignEvent, EMPTY_OUTSIDE, ignoreEvent, pendingEvents } from '../outside.js';
+import { assignEvent, claimOutside, EMPTY_OUTSIDE, ignoreEvent, pendingEvents } from '../outside.js';
 import { alertCandidates, evaluateAlerts, normalizeAlertSettings, validateAlertSettings } from './alerts.js';
 import { alertText } from './format.js';
 import { alertsView, deviceKey, devicesView, helpView, MAIN_KEYBOARD, menuAction, OUTSIDE_SPLIT, outsideView, usageView } from './views.js';
@@ -280,8 +280,15 @@ export function createTelegramService({ db, api, box, avatar = null, publicUrl, 
   /** 🧭 "o:ask" re-asks about every unanswered usage outside Claude Code; "o:<event>:<device key>" answers. */
   async function handleOutside(bot, chatId, messageId, id, key) {
     if (id !== 'ask') return answerOutside(bot, chatId, messageId, id, key);
-    const pending = pendingEvents(outsideState(bot.userId));
-    if (!pending.length) return '✅ Nothing to assign';
+    const state = outsideState(bot.userId);
+    let pending = pendingEvents(state);
+    if (!pending.length) {
+      // Not asked about yet (below the threshold): make it a question now.
+      const claimed = claimOutside(state, db.listReports(bot.userId), null);
+      if (!claimed?.event) return '✅ Nothing to assign';
+      db.setOutsideState(bot.userId, claimed.state);
+      pending = [claimed.event];
+    }
     const names = deviceNames(bot.userId);
     for (const event of pending) await send(bot, chatId, outsideView(event, names));
     return '';

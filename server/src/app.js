@@ -6,7 +6,7 @@ import { computeShares, isValidDeviceName, validateReport } from '../../plugin/s
 import { applyLimits, deviceStatus, NO_LIMITS, validateLimits } from '../../plugin/scripts/limits.js';
 import { generateToken, hashToken, isWellFormedToken, safeEqual } from './auth.js';
 import { bearerToken, clientIp, HttpError, readJsonBody, sendFile, sendJson } from './http.js';
-import { detectOutside, EMPTY_OUTSIDE } from './outside.js';
+import { addOutside, claimOutside, detectOutside, EMPTY_OUTSIDE, pendingEvents, planRates } from './outside.js';
 import { createRateLimiter } from './ratelimit.js';
 import { createTelegramApi } from './telegram/api.js';
 import { createSecretBox } from './telegram/secret-box.js';
@@ -126,7 +126,8 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     const limits = db.listLimits(user.id);
     const devices = reports.map((r) => ({ name: r.device, reportedAt: r.reportedAt, limits: limits[r.device] ?? NO_LIMITS }));
     const agents = summarizeAgentReports(reports);
-    const shares = computeShares(reports, outsideState(user.id).events);
+    const outside = outsideState(user.id);
+    const shares = computeShares(reports, outside.events, planRates(outside));
     return { summary: { ...applyLimits(shares, limits), devices, agents }, limits };
   }
 
@@ -161,6 +162,33 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     // Only a new event is announced; growth of an unanswered one shows in 📊 Usage and when it is answered.
     if (outside.isNew) await tg.askOutside(user, outside.event).catch((error) => log(`telegram outside-usage question failed: ${error.message}`));
     return { device: clean.device, status: deviceStatus(summary, clean.device, limits[clean.device]) };
+  }
+
+  /** What the server knows about usage outside Claude Code: the % per dollar it uses, and open questions. */
+  function outsideStatus(user) {
+    const state = outsideState(user.id);
+    const { summary } = limitedSummary(user);
+    const unexplained = Object.fromEntries(Object.entries(summary.outside ?? {}).map(([key, w]) => [key, w.unassignedPct]));
+    return { rates: planRates(state), pending: pendingEvents(state), unexplained };
+  }
+
+  /**
+   * Backfill: puts outside usage on one device — `amounts` (% per window) when given, else every unanswered
+   * event plus whatever the plan rate says Claude Code does not explain.
+   */
+  async function assignOutside(req, user) {
+    const body = await readJsonBody(req);
+    if (typeof body?.device !== 'string' || !isValidDeviceName(body.device)) throw new HttpError(400, 'device must be a device name');
+    if (!db.hasDevice(user.id, body.device)) throw new HttpError(404, 'device not found');
+    if (body.amounts !== undefined) {
+      const added = addOutside(outsideState(user.id), db.listReports(user.id), body.device, body.amounts);
+      if (!added) throw new HttpError(400, 'amounts must be { fiveHour?, sevenDay? } between 0 and the plan % of each window');
+      db.setOutsideState(user.id, added.state);
+      return { device: body.device, assigned: 0, event: added.event };
+    }
+    const claimed = claimOutside(outsideState(user.id), db.listReports(user.id), body.device);
+    if (claimed) db.setOutsideState(user.id, claimed.state);
+    return { device: body.device, assigned: claimed?.assigned ?? 0, event: claimed?.event ?? null };
   }
 
   async function setLimits(req, user, encodedName) {
@@ -205,6 +233,8 @@ export function createApp({ db, registration, proxyHops = 0, maxDevicesPerUser =
     ['DELETE', /^\/api\/me$/, (req) => deleteMe(authenticate(req))],
     ['POST', /^\/api\/report$/, (req) => report(req, authenticate(req))],
     ['GET', /^\/api\/summary$/, (req) => limitedSummary(authenticate(req)).summary],
+    ['GET', /^\/api\/outside$/, (req) => outsideStatus(authenticate(req))],
+    ['POST', /^\/api\/outside\/assign$/, (req) => assignOutside(req, authenticate(req))],
     ['PUT', /^\/api\/devices\/([^/]+)\/limits$/, (req, m) => setLimits(req, authenticate(req), m[1])],
     ['DELETE', /^\/api\/devices\/([^/]+)$/, (req, m) => removeDevice(authenticate(req), m[1])],
     ['GET', /^\/api\/telegram$/, (req) => tg.status(authenticate(req))],

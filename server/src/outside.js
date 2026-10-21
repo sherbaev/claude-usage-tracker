@@ -2,7 +2,8 @@
 // local logs, only in the account's plan %. Once finished windows have taught us how much plan % a dollar of
 // Claude Code uses, any % that the devices' Claude Code cost does not explain is outside usage — even while
 // Claude Code is running. Before that, only a rise with no Claude Code cost at all counts. Each finding
-// becomes an event the user assigns to a device from the Telegram bot. Pure: the caller stores `state`.
+// becomes an event: when reports show Claude Desktop, claude.ai or the Claude extension was just used on exactly
+// one device, it is put on that device; otherwise the Telegram bot asks. Pure: the caller stores `state`.
 import { randomBytes } from 'node:crypto';
 import { sameWindow, WINDOWS, windowPools } from '../../plugin/scripts/core.js';
 
@@ -25,6 +26,15 @@ const MIN_SAMPLE_PCT = 1;
 const OUTLIER_FACTOR = Object.freeze({ fiveHour: 2, sevenDay: 3 });
 // The rate is an estimate: unexplained % below this share of the expected % is treated as noise.
 const RATE_TOLERANCE = 0.2;
+// Until two windows have finished: the lowest % per dollar seen in recent windows. Outside usage only ever
+// raises the ratio, so the lowest one is the cleanest. Whole-point rounding makes small % too coarse.
+const MIN_LOW_PCT = 5;
+const MIN_LOW_COST_USD = 5;
+const MAX_LOWS = 6;
+// Activity in Claude Desktop / claude.ai / the extension this long before the rise began still counts.
+const ACTIVITY_LOOKBACK_MS = 60 * 60 * 1000;
+// Backfill ignores leftovers smaller than this (rounding).
+const MIN_CLAIM_PCT = 0.05;
 
 export const EMPTY_OUTSIDE = Object.freeze({
   baseline: Object.freeze({}),
@@ -32,6 +42,7 @@ export const EMPTY_OUTSIDE = Object.freeze({
   last: Object.freeze({}),
   segment: null,
   samples: Object.freeze({ fiveHour: Object.freeze([]), sevenDay: Object.freeze([]) }),
+  lows: Object.freeze({ fiveHour: Object.freeze([]), sevenDay: Object.freeze([]) }),
   since: Object.freeze({}),
 });
 
@@ -58,9 +69,35 @@ function rateOf(samples = [], outlierFactor) {
   return sum(kept.map((s) => s.pct)) / sum(kept.map((s) => s.cost));
 }
 
-/** @returns {{ fiveHour: number|null, sevenDay: number|null }} learned plan % per dollar of Claude Code */
-export const planRates = (state) =>
-  Object.fromEntries(Object.keys(WINDOWS).map((key) => [key, rateOf(state.samples?.[key], OUTLIER_FACTOR[key])]));
+/** Median of the lowest % per dollar seen in each recent window, or null. */
+function provisionalRate(lows = []) {
+  if (!lows.length) return null;
+  const ratios = lows.map((l) => l.ratio).sort((a, b) => a - b);
+  return ratios[Math.floor((ratios.length - 1) / 2)];
+}
+
+/**
+ * Plan % per dollar of Claude Code: the lower of the learned and the lowest-seen rate (outside usage only
+ * ever raises a rate, so the lower one is the cleaner), or null before either exists.
+ * @returns {{ fiveHour: number|null, sevenDay: number|null }}
+ */
+export function planRates(state) {
+  return Object.fromEntries(
+    Object.keys(WINDOWS).map((key) => {
+      const rates = [rateOf(state.samples?.[key], OUTLIER_FACTOR[key]), provisionalRate(state.lows?.[key])].filter((r) => r !== null);
+      return [key, rates.length ? Math.min(...rates) : null];
+    }),
+  );
+}
+
+/** Keeps the lowest % per dollar of each window (last few windows). */
+function updateLows(lows = [], snap) {
+  if (!snap || snap.pct < MIN_LOW_PCT || snap.cost < MIN_LOW_COST_USD) return lows;
+  const ratio = snap.pct / snap.cost;
+  const current = lows.at(-1);
+  if (current && sameWindow(current.resetsAt, snap.resetsAt)) return [...lows.slice(0, -1), { ...current, ratio: Math.min(current.ratio, ratio) }];
+  return [...lows, { resetsAt: snap.resetsAt, ratio }].slice(-MAX_LOWS);
+}
 
 /** When a 5h window ends: its Claude Code %/$ and the weekly %/$ gained during it, minus outside usage found. */
 function finishedSamples(state, current5) {
@@ -104,7 +141,11 @@ function learn(state, account, costs, weekDevices) {
   const segment = isNewSegment
     ? { fiveResetsAt: snapshots.fiveHour.resetsAt, weekResetsAt: snapshots.sevenDay.resetsAt, weekPct: snapshots.sevenDay.pct, weekCost: snapshots.sevenDay.cost, devices: weekDevices }
     : state.segment && { ...state.segment, isMixed: state.segment.isMixed || weekDevices.some((d) => !state.segment.devices?.includes(d)) };
-  return { last, samples, segment };
+  // Outside usage already put on a device is not Claude Code: leave it out of the ratio.
+  const confirmed = state.events.filter(isConfirmed);
+  const codeOnly = (key) => snapshots[key] && { ...snapshots[key], pct: snapshots[key].pct - knownPct(confirmed, key, snapshots[key].resetsAt) };
+  const lows = Object.fromEntries(Object.keys(WINDOWS).map((key) => [key, updateLows(state.lows[key], codeOnly(key))]));
+  return { last, samples, segment, lows };
 }
 
 // ---------- finding outside usage ----------
@@ -138,14 +179,35 @@ function unexplained(key, current, cost, rate, events, since, now, settleMs) {
   return { amount: Math.max(0, amount), overSince, isDue: isOver && now - at >= settleMs };
 }
 
-/** Adds to the latest unanswered event when it covers the same windows, else starts a new one. */
-function addEvent(events, windows, detectedAt, newId) {
+/**
+ * The one device where Claude Desktop, claude.ai or the Claude extension was used since `from`, with the
+ * surface used last, or null when none or several were.
+ */
+function activeDevice(reports, from) {
+  const active = reports
+    .map((r) => {
+      const [surface, at] = Object.entries(r.surfaces ?? {})
+        .filter(([, iso]) => iso && Date.parse(iso) >= from)
+        .sort(([, a], [, b]) => Date.parse(b) - Date.parse(a))[0] ?? [];
+      return surface ? { device: r.device, surface, at } : null;
+    })
+    .filter(Boolean);
+  return active.length === 1 ? active[0] : null;
+}
+
+/** When the unexplained rise began: the earliest settle start among the windows, else now. */
+const riseStart = (findings, now) =>
+  Math.min(now, ...Object.values(findings).map((f) => f.overSince?.at ?? f.base?.risingSince ?? now));
+
+/**
+ * Adds to the latest event when it is unanswered (or put automatically on the same device) and covers the
+ * same windows, else starts a new one — on `auto.device` when there is one.
+ */
+function addEvent(events, windows, detectedAt, newId, auto) {
   const pending = events.at(-1);
+  const isOpen = pending && !pending.split && (!pending.device || (pending.auto && pending.device === auto?.device));
   const canMerge =
-    pending &&
-    !pending.device &&
-    !pending.split &&
-    Object.entries(windows).every(([key, w]) => !pending.windows[key] || sameWindow(pending.windows[key].resetsAt, w.resetsAt));
+    isOpen && Object.entries(windows).every(([key, w]) => !pending.windows[key] || sameWindow(pending.windows[key].resetsAt, w.resetsAt));
   if (canMerge) {
     const added = Object.fromEntries(
       Object.entries(windows).map(([key, w]) => [key, { pct: (pending.windows[key]?.pct ?? 0) + w.pct, resetsAt: w.resetsAt }]),
@@ -153,7 +215,7 @@ function addEvent(events, windows, detectedAt, newId) {
     const merged = { ...pending, detectedAt, windows: { ...pending.windows, ...added } };
     return { events: [...events.slice(0, -1), merged], event: merged, isNew: false };
   }
-  const event = { id: newId(), device: null, detectedAt, windows };
+  const event = auto ? { id: newId(), device: auto.device, auto: auto.surface, detectedAt, windows } : { id: newId(), device: null, detectedAt, windows };
   return { events: [...events, event].slice(-MAX_EVENTS), event, isNew: true };
 }
 
@@ -193,8 +255,48 @@ export function detectOutside(stored, reports, { now = Date.now(), newId = rando
       .filter(([key, f]) => isAsked(f) || key === 'fiveHour')
       .map(([key, f]) => [key, { pct: isAsked(f) ? f.amount : 0, resetsAt: account[key].resetsAt }]),
   );
-  const added = addEvent(events, windows, new Date(now).toISOString(), newId);
+  const auto = activeDevice(reports, riseStart(findings, now) - ACTIVITY_LOOKBACK_MS);
+  const added = addEvent(events, windows, new Date(now).toISOString(), newId, auto);
   return { state: { ...next, events: added.events }, event: added.event, isNew: added.isNew };
+}
+
+/**
+ * Backfill with known amounts: puts `amounts` (% per window) on `device` in the current windows. Null when
+ * an amount is not a number between 0 and the plan % of its window.
+ */
+export function addOutside(state, reports, device, amounts, { now = Date.now(), newId = randomId } = {}) {
+  const { account } = windowPools(reports);
+  const entries = Object.entries(amounts ?? {}).filter(([key]) => key in WINDOWS);
+  const isValid = entries.length && entries.every(([key, pct]) => account[key] && Number.isFinite(pct) && pct > 0 && pct <= account[key].pct);
+  if (!isValid) return null;
+  const windows = Object.fromEntries(entries.map(([key, pct]) => [key, { pct, resetsAt: account[key].resetsAt }]));
+  const event = { id: newId(), device, detectedAt: new Date(now).toISOString(), windows };
+  return { state: { ...state, events: [...state.events, event].slice(-MAX_EVENTS) }, event };
+}
+
+/**
+ * Backfill and on-demand questions: puts every unanswered event on `device`, plus — as a new event — any %
+ * the plan rate says Claude Code cost does not explain yet. With `device` null the new event is left
+ * unanswered (to ask about). Returns null when there is nothing to claim.
+ */
+export function claimOutside(state, reports, device, { now = Date.now(), newId = randomId } = {}) {
+  const { account, inWindow } = windowPools(reports);
+  const rates = planRates(state);
+  const leftovers = Object.fromEntries(
+    Object.keys(WINDOWS)
+      .filter((key) => account[key] && rates[key] !== null)
+      .map((key) => {
+        const cost = sum(inWindow[key].map((r) => r.local[key].costUSD));
+        return [key, { pct: account[key].pct - rates[key] * cost - knownPct(state.events, key, account[key].resetsAt), resetsAt: account[key].resetsAt }];
+      })
+      .filter(([, w]) => w.pct >= MIN_CLAIM_PCT),
+  );
+  const pending = device ? pendingEvents(state, now).map((e) => e.id) : [];
+  if (!pending.length && !Object.keys(leftovers).length) return null;
+  const events = state.events.map((e) => (pending.includes(e.id) ? { ...e, device, split: false } : e));
+  if (!Object.keys(leftovers).length) return { state: { ...state, events }, event: null, assigned: pending.length };
+  const event = { id: newId(), device, detectedAt: new Date(now).toISOString(), windows: leftovers };
+  return { state: { ...state, events: [...events, event].slice(-MAX_EVENTS) }, event, assigned: pending.length };
 }
 
 /** Unanswered events whose windows have not all reset, oldest first. */

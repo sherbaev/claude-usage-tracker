@@ -77,24 +77,39 @@ export function windowPools(reports) {
  * user assigned to each known device, and the % nobody has been assigned yet.
  */
 function outsideUsage(events, key, accountWin, knownDevices) {
-  return events
-    .filter((e) => e.windows?.[key] && sameWindow(e.windows[key].resetsAt, accountWin.resetsAt))
-    .filter((e) => !e.split && (!e.device || knownDevices.has(e.device))) // split: shared by Claude Code usage
+  const inThisWindow = events.filter((e) => e.windows?.[key] && sameWindow(e.windows[key].resetsAt, accountWin.resetsAt));
+  // "Not sure" usage is treated as Claude Code: shared by cost.
+  const splitPct = inThisWindow.filter((e) => e.split).reduce((sum, e) => sum + e.windows[key].pct, 0);
+  return inThisWindow
+    .filter((e) => !e.split && (!e.device || knownDevices.has(e.device)))
     .reduce(
       (acc, e) =>
         e.device
           ? { ...acc, assigned: { ...acc.assigned, [e.device]: (acc.assigned[e.device] ?? 0) + e.windows[key].pct } }
           : { ...acc, unassignedPct: acc.unassignedPct + e.windows[key].pct },
-      { assigned: {}, unassignedPct: 0 },
+      { assigned: {}, unassignedPct: 0, splitPct },
     );
 }
 
-function windowRows(key, accountWin, inWindow, outside, reportedAt) {
+/**
+ * The % Claude Code explains per dollar. With a learned `rate`, each device gets rate × its own cost, so a
+ * device that stopped working keeps its share and plan % beyond that (usage outside Claude Code nobody has
+ * placed yet) is returned as `residualPct`. Without one, or when the rate explains more than the plan shows,
+ * the Claude Code % is split by cost.
+ */
+function codeSplit(codePct, totalCost, rate, splitPct) {
+  const expected = rate > 0 && totalCost > 0 ? rate * totalCost + splitPct : null;
+  if (expected === null || expected >= codePct) return { perDollar: totalCost > 0 ? codePct / totalCost : 0, residualPct: 0 };
+  return { perDollar: expected / totalCost, residualPct: codePct - expected };
+}
+
+function windowRows(key, accountWin, inWindow, outside, reportedAt, rate) {
   const assignedTotal = Object.values(outside.assigned).reduce((sum, pct) => sum + pct, 0);
   const codePct = Math.max(0, accountWin.pct - assignedTotal - outside.unassignedPct);
   const totalCost = inWindow.reduce((sum, r) => sum + r.local[key].costUSD, 0);
+  const { perDollar, residualPct } = codeSplit(codePct, totalCost, rate, outside.splitPct ?? 0);
   const rows = inWindow.map((r) => {
-    const fromCode = totalCost > 0 ? (codePct * r.local[key].costUSD) / totalCost : 0;
+    const fromCode = perDollar * r.local[key].costUSD;
     const outsidePct = outside.assigned[r.device] ?? 0;
     return {
       device: r.device,
@@ -109,26 +124,31 @@ function windowRows(key, accountWin, inWindow, outside, reportedAt) {
   const outsideOnly = Object.entries(outside.assigned)
     .filter(([device]) => !inWindow.some((r) => r.device === device))
     .map(([device, pct]) => ({ device, reportedAt: reportedAt.get(device), costUSD: 0, tokens: 0, sharePct: pct, outsidePct: pct, models: [] }));
-  return [...rows, ...outsideOnly].sort((a, b) => b.costUSD - a.costUSD);
+  return { rows: [...rows, ...outsideOnly].sort((a, b) => b.costUSD - a.costUSD), residualPct };
 }
 
 /**
- * Splits the account-wide utilization across devices proportionally to each device's local cost inside
- * the same window, using the freshest account snapshot. Usage outside Claude Code (`outsideEvents`) is
- * added to the device it was assigned to, or held apart as `outside[window].unassignedPct`.
+ * Splits the account-wide utilization across devices by each device's local cost inside the same window,
+ * using the freshest account snapshot. Usage outside Claude Code (`outsideEvents`) is added to the device
+ * it was assigned to; unassigned usage, and with a learned `rates[window]` (% per dollar) any % Claude Code
+ * cost does not explain, is held apart as `outside[window].unassignedPct`.
  */
-export function computeShares(reports, outsideEvents = []) {
+export function computeShares(reports, outsideEvents = [], rates = {}) {
   if (!reports.length) return { account: null, windows: {} };
   const { account, inWindow } = windowPools(reports);
   const reportedAt = new Map(reports.map((r) => [r.device, r.reportedAt]));
   const keys = Object.keys(WINDOWS);
   const outside = Object.fromEntries(
-    keys.map((key) => [key, account[key] ? outsideUsage(outsideEvents, key, account[key], reportedAt) : { assigned: {}, unassignedPct: 0 }]),
+    keys.map((key) => [key, account[key] ? outsideUsage(outsideEvents, key, account[key], reportedAt) : { assigned: {}, unassignedPct: 0, splitPct: 0 }]),
   );
-  const windows = Object.fromEntries(
-    keys.map((key) => [key, account[key] ? windowRows(key, account[key], inWindow[key], outside[key], reportedAt) : []]),
+  const split = Object.fromEntries(
+    keys.map((key) => [key, account[key] ? windowRows(key, account[key], inWindow[key], outside[key], reportedAt, rates[key]) : { rows: [], residualPct: 0 }]),
   );
-  return { account, windows, outside: Object.fromEntries(keys.map((key) => [key, { unassignedPct: outside[key].unassignedPct }])) };
+  return {
+    account,
+    windows: Object.fromEntries(keys.map((key) => [key, split[key].rows])),
+    outside: Object.fromEntries(keys.map((key) => [key, { unassignedPct: outside[key].unassignedPct + split[key].residualPct }])),
+  };
 }
 
 const DEVICE_RE = /^[\w.\- ]{1,64}$/;
@@ -154,6 +174,20 @@ function cleanLocalWindow(loc) {
     : null;
 }
 
+// When Claude Desktop, claude.ai or the Claude Chrome extension last wrote its local storage on the device.
+export const SURFACES = Object.freeze(['desktop', 'web', 'extension']);
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+function cleanSurfaces(surfaces, reportedAt) {
+  const latest = Date.parse(reportedAt) + CLOCK_SKEW_MS;
+  return Object.fromEntries(
+    SURFACES.map((name) => {
+      const at = Date.parse(surfaces?.[name]);
+      return [name, Number.isNaN(at) || at > latest ? null : new Date(at).toISOString()];
+    }),
+  );
+}
+
 /** Validates an incoming device report (server boundary). Returns a clean copy. */
 export function validateReport(body) {
   if (body == null || typeof body !== 'object') throw new Error('body must be an object');
@@ -169,5 +203,6 @@ export function validateReport(body) {
     account: Object.fromEntries(keys.map((k) => [k, cleanAccountWindow(body.account?.[k])])),
     local: Object.fromEntries(keys.map((k) => [k, cleanLocalWindow(body.local?.[k])])),
     agents: cleanAgents(body.agents),
+    surfaces: cleanSurfaces(body.surfaces, body.reportedAt),
   };
 }

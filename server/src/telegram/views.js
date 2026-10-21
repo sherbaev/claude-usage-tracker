@@ -203,6 +203,16 @@ export function helpView() {
   return { text, reply_markup: MAIN_KEYBOARD };
 }
 
+const SURFACE_NAMES = Object.freeze({ desktop: 'Claude Desktop', web: 'claude.ai', extension: 'the Claude Chrome extension' });
+
+function countedText(event) {
+  const name = `<b>${escapeHtml(event.device)}</b>`;
+  const why = SURFACE_NAMES[event.auto];
+  return why
+    ? `🤖 Counted for ${name} automatically — ${why} was used there. Tap another device to change.`
+    : `✅ Counted for ${name}. Tap another device to change.`;
+}
+
 const outsideAmounts = (windows) =>
   PLAN_ROWS.filter(([key]) => windows?.[key]?.pct > 0)
     .map(([key, icon]) => `${icon} ${LABEL[key]} +${pct(windows[key].pct)}`)
@@ -217,7 +227,7 @@ export function outsideView(event, deviceNames, outcome = null) {
   const amounts = outsideAmounts(event.windows);
   if (outcome === 'split') return { text: [OUTSIDE_TITLE, amounts, '🙈 Split across devices by their Claude Code usage.'].join('\n') };
   const lines = event.device
-    ? [OUTSIDE_TITLE, amounts, `✅ Counted for <b>${escapeHtml(event.device)}</b>. Tap another device to change.`]
+    ? [OUTSIDE_TITLE, amounts, countedText(event)]
     : [
         OUTSIDE_TITLE,
         "Your plan went up more than your devices' Claude Code explains — likely Claude Desktop, claude.ai or the Chrome extension.",

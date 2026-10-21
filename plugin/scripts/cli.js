@@ -30,6 +30,7 @@ import { attachCodexPlan, claudeDaily, summarizeAgents } from './agents.js';
 import { readCodexSnapshot } from './codex.js';
 import { attachModels, summarizeModels, unitPrices } from './models.js';
 import { renderPanel } from './render.js';
+import { surfaceActivity } from './surfaces.js';
 import { fetchAccountUsage, fetchAgentDaily, fetchLocalBlocks, getAccessToken, NO_CLAUDE_LOGIN } from './sources.js';
 import { fetchMe, fetchSummary, pushReport, registerAccount } from './sync.js';
 import { readUsageEntries } from './transcripts.js';
@@ -94,12 +95,13 @@ const agentDays = (now) => ({ today: localDate(now), weekStart: localDate(new Da
 async function collectReport(device) {
   const now = new Date();
   const sinceMs = now.getTime() - BREAKDOWN_LOOKBACK_MS;
-  const [account, blocksOrError, daily, entries, codexSnapshot] = await Promise.all([
+  const [account, blocksOrError, daily, entries, codexSnapshot, surfaces] = await Promise.all([
     fetchClaudeAccount(),
     fetchLocalBlocks().catch((error) => error),
     optional('per-agent usage', () => fetchAgentDaily({ now })),
     optional('model breakdown', () => readUsageEntries({ sinceMs })),
     optional('Codex plan usage', () => readCodexSnapshot({ sinceMs })),
+    optional('Claude Desktop / claude.ai activity', () => surfaceActivity()),
   ]);
   // Without a Claude login there is no Claude data, and ccusage's Claude commands fail: skip them.
   if (blocksOrError instanceof Error && account !== NO_ACCOUNT) throw blocksOrError;
@@ -107,7 +109,7 @@ async function collectReport(device) {
   const prices = unitPrices(claudeDaily(daily));
   const models = entries && daily ? summarizeModels(entries, prices, account) : {};
   const agents = attachCodexPlan(daily ? summarizeAgents(daily, agentDays(now)) : {}, codexSnapshot);
-  return { device, reportedAt: now.toISOString(), account, local: attachModels(localWindowTotals(blocks, account), models), agents };
+  return { device, reportedAt: now.toISOString(), account, local: attachModels(localWindowTotals(blocks, account), models), agents, surfaces };
 }
 
 async function sendReport(config, report) {
