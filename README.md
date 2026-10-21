@@ -120,7 +120,7 @@ so there are no commands to remember.
 
 | Button | What it shows |
 |---|---|
-| 📊 **Usage** | Claude 5-hour and weekly usage as bars, each device against its cap (🟩 fine · 🟨 getting close · 🟥 at the cap · ⛔ over), Codex and other agents. 🔄 Refresh updates it in place |
+| 📊 **Usage** | Claude 5-hour and weekly usage as bars, each device against its cap (🟩 fine · 🟨 getting close · 🟥 at the cap · ⛔ over), usage outside Claude Code not yet assigned (🧭), Codex and other agents. 🔄 Refresh updates it in place |
 | 💻 **Devices** | Every device with its caps and when it last synced. Tap a device's **🔔 / 🔕** button to turn its alerts on or off |
 | 🔔 **Alerts** | Alerts on or off, near-limit level (70 / 80 / 90%), limit reached, Codex limits |
 | ❓ **Help** | What each button does. Send `/stop` to unlink a chat |
@@ -133,6 +133,32 @@ so there are no commands to remember.
 - **Whole account:** ⚠️ / 🚨 when Claude's 5-hour or weekly limit is near or reached, and the same for Codex.
 - Each alert is sent once per window. Alerts are checked when a device reports, about every 5 minutes while you use
   Claude Code.
+
+### Usage outside Claude Code
+
+Claude Desktop, claude.ai and the Chrome extension use the same plan, but they leave no logs on your devices. When
+the plan goes up and no device's Claude Code usage does, the bot asks whose it was:
+
+```text
+🧭 Usage outside Claude Code
+Your plan went up while no device used Claude Code — likely Claude Desktop, claude.ai or the Chrome extension.
+⏱ 5h +8.0% · 📅 Weekly +3.0%
+
+👉 Whose was it? It then counts toward that device's share and caps.
+[ 💻 MacBook Pro ]
+[ 💻 Work PC ]
+[ 🙈 Not sure — split by usage ]
+```
+
+- Tap a device and the usage counts toward that device's share and caps, so its alerts and blocking stay accurate.
+  Tap another device to change your answer.
+- **🙈 Not sure** splits it across devices by their Claude Code usage, the same way as before this feature.
+- Until you answer, the usage is shown on its own (`🧭 Outside Claude Code … not assigned` in 📊 Usage, and on the
+  dashboard) instead of being added to your devices. **🧭 Assign outside usage** asks again.
+- Rises are spotted when a device next reports. The bot waits until the rise has gone unexplained for 6 minutes,
+  so a device whose Claude Code report is still on its way isn't mistaken for Desktop use. Rises below 2 points
+  of the 5-hour window and 1 point of the weekly window add up until they are large enough to ask about. If you use Claude Code rarely, a scheduled `push` (see below)
+  lets the bot ask sooner.
 
 The bot only answers chats you linked. Bot tokens are stored encrypted on your server.
 

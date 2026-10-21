@@ -121,9 +121,19 @@ function renderWindows(summary) {
         className: 'muted small',
         textContent: `Resets in ${fmtDuration(resets - Date.now())} · ${resets.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`,
       }),
+      ...outsideNote(summary.outside?.[key]),
     ]);
   });
   $('windows').replaceChildren(...cards);
+}
+
+/** Usage outside Claude Code (Claude Desktop, claude.ai, Chrome) that no device has been assigned yet. */
+function outsideNote(outside) {
+  if (!(outside?.unassignedPct > 0)) return [];
+  return [el('p', {
+    className: 'small warn',
+    textContent: `${fmtPct(outside.unassignedPct)} used outside Claude Code (Desktop, claude.ai, Chrome) — not counted for any device yet. Assign it from the Telegram bot.`,
+  })];
 }
 
 // ---------- per-device caps ----------
@@ -157,6 +167,7 @@ function shareCell(row, limits, key) {
       el('span', { className: `small capline ${row.overLimit ? 'warn' : 'muted'}`, textContent: capText(row), hidden: row.limitPct == null }),
     ]),
     el('div', { className: 'muted small', textContent: `${fmtUsd(row.costUSD)} · ${fmtTokens(row.tokens)} tok` }),
+    el('div', { className: 'muted small', textContent: `incl. ${fmtPct(row.outsidePct ?? 0)} outside Claude Code`, hidden: !(row.outsidePct > 0) }),
   ]);
 }
 

@@ -1,4 +1,4 @@
-// Bot screens: text + keyboard for Usage, Devices, Alerts and Help. Pure. Telegram has no icon set, so
+// Bot screens: text + keyboard for Usage, Devices, Alerts, Help and the usage-outside-Claude-Code question. Pure. Telegram has no icon set, so
 // emojis are the icons here; every state is spelled out in words too (not emoji alone).
 import { createHash } from 'node:crypto';
 import { duration, escapeHtml, pct, resetsIn, usd } from './format.js';
@@ -16,6 +16,9 @@ const PLAN_ROWS = [
   ['sevenDay', '📅', 'Weekly'],
 ];
 const SHORT = Object.freeze({ fiveHour: '5h', sevenDay: 'weekly' });
+const LABEL = Object.freeze({ fiveHour: '5h', sevenDay: 'Weekly' });
+const OUTSIDE_TITLE = '🧭 <b>Usage outside Claude Code</b>';
+export const OUTSIDE_SPLIT = 'x';
 const BELL_ON = '🔔';
 const BELL_OFF = '🔕';
 const CHECK_ON = '✅';
@@ -73,18 +76,29 @@ function capBar(share, cap) {
   return block.repeat(filled) + '⬜'.repeat(CAP_BAR_WIDTH - filled);
 }
 
-/** One window of one device, e.g. "⏱ 5h  🟩🟩⬜⬜⬜ 9.0% of 50% cap". */
+function shareText(row) {
+  if (row.limitPct == null) return `${pct(row.sharePct)} of plan · no cap`;
+  const bar = capBar(row.sharePct, row.limitPct);
+  if (row.overLimit) return `${bar} ⛔ ${pct(row.sharePct)} — over ${row.limitPct}% cap`;
+  return `${bar} ${pct(row.sharePct)} of ${row.limitPct}% cap`;
+}
+
+/** One window of one device, e.g. "⏱ 5h  🟩🟩⬜⬜⬜ 9.0% of 50% cap · 🧭 2.0% outside Claude Code". */
 function deviceWindowLine(row, icon, label) {
   if (!row) return null;
-  const head = `${INDENT}${icon} ${label}  `;
-  if (row.limitPct == null) return `${head}${pct(row.sharePct)} of plan · no cap`;
-  const bar = capBar(row.sharePct, row.limitPct);
-  if (row.overLimit) return `${head}${bar} ⛔ ${pct(row.sharePct)} — over ${row.limitPct}% cap`;
-  return `${head}${bar} ${pct(row.sharePct)} of ${row.limitPct}% cap`;
+  const outside = row.outsidePct > 0 ? ` · 🧭 ${pct(row.outsidePct)} outside Claude Code` : '';
+  return `${INDENT}${icon} ${label}  ${shareText(row)}${outside}`;
 }
 
 const deviceWindowLines = (summary, name) =>
-  PLAN_ROWS.map(([key, icon]) => deviceWindowLine(rowFor(summary, key, name), icon, key === 'fiveHour' ? '5h' : 'Weekly')).filter(Boolean);
+  PLAN_ROWS.map(([key, icon]) => deviceWindowLine(rowFor(summary, key, name), icon, LABEL[key])).filter(Boolean);
+
+/** Usage outside Claude Code nobody has been assigned yet, e.g. "5h 3.0% · weekly 1.0%", or ''. */
+function unassignedText(outside) {
+  return PLAN_ROWS.filter(([key]) => outside?.[key]?.unassignedPct > 0)
+    .map(([key]) => `${SHORT[key]} ${pct(outside[key].unassignedPct)}`)
+    .join(' · ');
+}
 
 function deviceUsageLines(summary, settings) {
   return deviceNames(summary).flatMap((name) => {
@@ -108,10 +122,12 @@ function agentLines(agents) {
 
 /** 📊 Usage: plan windows, every device (with its alert bell), other agents. */
 export function usageView(summary, settings, now = Date.now()) {
-  const plan = planLines(summary.account, now);
+  const unassigned = unassignedText(summary.outside);
+  const plan = [...planLines(summary.account, now), ...(unassigned ? [`🧭 Outside Claude Code: ${unassigned} — <b>not assigned</b>`] : [])];
   const devices = deviceUsageLines(summary, settings);
   const agents = agentLines(summary.agents);
-  const markup = inline([[button('🔄 Refresh', 'u:refresh'), button('💻 Device alerts', 'd:show')]]);
+  const assign = unassigned ? [[button('🧭 Assign outside usage', 'o:ask')]] : [];
+  const markup = inline([[button('🔄 Refresh', 'u:refresh'), button('💻 Device alerts', 'd:show')], ...assign]);
   if (!plan.length && !devices.length && !agents.length) {
     return { text: '📭 No devices have reported yet.\nInstall the plugin and use Claude Code on a device — it reports within a few minutes.', reply_markup: markup };
   }
@@ -180,8 +196,35 @@ export function helpView() {
     '💻 Devices — choose which devices send alerts',
     '🔔 Alerts — when to notify you',
     '❓ Help — this message',
+    '🧭 Used Claude Desktop, claude.ai or the Chrome extension? The bot asks which device it was, so caps stay right.',
     '',
     'Send /stop to unlink this chat.',
   ].join('\n');
   return { text, reply_markup: MAIN_KEYBOARD };
+}
+
+const outsideAmounts = (windows) =>
+  PLAN_ROWS.filter(([key]) => windows?.[key])
+    .map(([key, icon]) => `${icon} ${LABEL[key]} +${pct(windows[key].pct)}`)
+    .join(' · ');
+
+/**
+ * 🧭 Usage outside Claude Code: asks whose it was (one button per device), shows the chosen device, or —
+ * with `outcome` 'split' or 'expired' — closes the question.
+ */
+export function outsideView(event, deviceNames, outcome = null) {
+  if (!event || outcome === 'expired') return { text: `${OUTSIDE_TITLE}\n⌛ Already answered, or its window has reset.` };
+  const amounts = outsideAmounts(event.windows);
+  if (outcome === 'split') return { text: [OUTSIDE_TITLE, amounts, '🙈 Split across devices by their Claude Code usage.'].join('\n') };
+  const lines = event.device
+    ? [OUTSIDE_TITLE, amounts, `✅ Counted for <b>${escapeHtml(event.device)}</b>. Tap another device to change.`]
+    : [
+        OUTSIDE_TITLE,
+        'Your plan went up while no device used Claude Code — likely Claude Desktop, claude.ai or the Chrome extension.',
+        amounts,
+        '',
+        "👉 <b>Whose was it?</b> It then counts toward that device's share and caps.",
+      ];
+  const rows = deviceNames.map((name) => [button(`${name === event.device ? CHECK_ON : '💻'} ${name}`, `o:${event.id}:${deviceKey(name)}`)]);
+  return { text: lines.join('\n'), reply_markup: inline([...rows, [button('🙈 Not sure — split by usage', `o:${event.id}:${OUTSIDE_SPLIT}`)]]) };
 }

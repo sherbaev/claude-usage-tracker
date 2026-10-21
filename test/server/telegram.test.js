@@ -33,7 +33,7 @@ function fakeTelegram(overrides = {}) {
 async function boot({ dir, overrides } = {}) {
   const dataPath = dir ?? (await mkdtemp(join(dataDir, 'srv-')));
   const tg = fakeTelegram(overrides);
-  const settings = { ...readSettings({ DATA_DIR: dataPath }), port: 0, telegram: { fetch: tg.fetch, avatar: Buffer.from('jpg') } };
+  const settings = { ...readSettings({ DATA_DIR: dataPath }), port: 0, outsideSettleMs: 0, telegram: { fetch: tg.fetch, avatar: Buffer.from('jpg') } };
   const server = await startServer(settings);
   servers.push(server);
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -227,4 +227,56 @@ test('on start, bots connected before buttons existed are switched to receive bu
   assert.equal(upgrade?.url, hookUrl);
   assert.deepEqual(upgrade.allowed_updates, ['message', 'callback_query']);
   assert.deepEqual(second.tg.of('setMyCommands').at(-1)?.params.commands.map((c) => c.command), ['start']);
+});
+
+test('usage outside Claude Code: the bot asks whose it was and the answer moves the share', async () => {
+  const ctx = await boot();
+  const token = await ctx.register();
+  const bot = await connected(ctx, token);
+  await ctx.call('POST', '/api/report', { token, body: report(10) });
+  await ctx.call('POST', '/api/report', { token, body: report(10, { device: 'Home PC' }) });
+  await bot.link(111);
+  const summary = async () => (await ctx.call('GET', '/api/summary', { token })).json.data;
+  const row = (s, device) => s.windows.fiveHour.find((r) => r.device === device);
+
+  // The plan went up 6 points while no device's Claude Code cost moved (Claude Desktop, claude.ai, …).
+  await ctx.call('POST', '/api/report', { token, body: report(16) });
+  const question = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.match(question.text, /🧭 <b>Usage outside Claude Code<\/b>/);
+  assert.match(question.text, /5h \+6\.0%/);
+  const buttons = question.reply_markup.inline_keyboard.flat();
+  assert.deepEqual(buttons.map((b) => b.text), ['💻 Home PC', '💻 Work Mac', '🙈 Not sure — split by usage']);
+  let s = await summary();
+  assert.equal(s.outside.fiveHour.unassignedPct, 6);
+  assert.equal(row(s, 'Work Mac').sharePct + row(s, 'Home PC').sharePct, 10, 'devices keep only the Claude Code part');
+
+  await bot.tap(111, buttons[0].callback_data);
+  assert.match(ctx.tg.of('answerCallbackQuery').at(-1).params.text, /Home PC/);
+  assert.match(ctx.tg.of('editMessageText', 111).at(-1).params.text, /✅ Counted for <b>Home PC<\/b>/);
+  s = await summary();
+  assert.equal(s.outside.fiveHour.unassignedPct, 0);
+  assert.equal(row(s, 'Home PC').outsidePct, 6);
+  assert.equal(row(s, 'Home PC').sharePct, 11);
+
+  await bot.tap(111, 'o:ask');
+  assert.match(ctx.tg.of('answerCallbackQuery').at(-1).params.text, /Nothing to assign/);
+
+  await bot.tap(111, buttons[2].callback_data);
+  assert.match(ctx.tg.of('editMessageText', 111).at(-1).params.text, /🙈 Split across devices/);
+  s = await summary();
+  assert.equal(row(s, 'Home PC').outsidePct, 0);
+  assert.equal(row(s, 'Work Mac').sharePct + row(s, 'Home PC').sharePct, 16);
+
+  await bot.tap(111, buttons[1].callback_data);
+  assert.match(ctx.tg.of('editMessageText', 111).at(-1).params.text, /Already answered/);
+
+  // A later unanswered rise: 📊 Usage shows it with an Assign button that re-asks.
+  await ctx.call('POST', '/api/report', { token, body: report(20) });
+  await bot.send(111, '📊 Usage');
+  const usage = ctx.tg.of('sendMessage', 111).at(-1).params;
+  assert.match(usage.text, /not assigned/);
+  const sentBefore = ctx.tg.sent(111).length;
+  await bot.tap(111, 'o:ask');
+  assert.equal(ctx.tg.sent(111).length, sentBefore + 1);
+  assert.match(ctx.tg.sent(111).at(-1), /Whose was it\?/);
 });
