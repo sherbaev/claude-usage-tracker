@@ -19,4 +19,6 @@ Connect this device to the user's tracker account so it reports its Claude plan 
 
 Per-device caps (warn or block) are set on the tracker website under Devices → Cap.
 
+If the user also uses Claude Desktop, claude.ai or the Chrome extension on this device, suggest `/usage-tracker:background on`: it reports every 5 minutes even when Claude Code is closed, so that usage is noticed and the Telegram bot can ask which device it was.
+
 Never repeat the full token in your replies. If plugin options are also set via `/plugin` → Configure options, those take precedence over this setup.

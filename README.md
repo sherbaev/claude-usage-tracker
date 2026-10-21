@@ -60,6 +60,7 @@ Needs Claude Code logged in with a Claude subscription (Pro / Max / Team, not an
 |---|---|
 | `/usage-tracker:status` | Account 5h / weekly %, reset times, each device's share and cap |
 | `/usage-tracker:setup [url] [token] [name]` | Connect this device |
+| `/usage-tracker:background [on\|off\|status]` | Report every 5 minutes even when Claude Code is closed, so Claude Desktop, claude.ai and Chrome extension usage is seen (macOS; prints a crontab line elsewhere) |
 
 ```text
 Claude plan windows · device: work-macbook
@@ -163,8 +164,11 @@ Your plan went up more than your devices' Claude Code explains — likely Claude
   models you use. Amounts under about 20% of your Claude Code usage, or under 2 points (5-hour) / 1 point (weekly),
   are treated as noise and add up until they're large enough to ask about.
 - Usage is checked when a device reports. The bot waits 6 minutes so a device whose Claude Code report is still on
-  its way isn't mistaken for Desktop use. If you use Claude Code rarely, a scheduled `push` (see below) lets the
-  bot ask sooner.
+  its way isn't mistaken for Desktop use.
+- **Turn on background reporting** with `/usage-tracker:background on` on the Mac where you use Claude Desktop or
+  the browser. Devices otherwise report only while Claude Code runs, so the server doesn't see Desktop use until
+  Claude Code next runs. Usage from a window that has already reset is never seen. Background reporting uses the
+  Claude login that Claude Code keeps fresh, so open Claude Code at least once a day.
 
 The bot only answers chats you linked. Bot tokens are stored encrypted on your server.
 
