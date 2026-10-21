@@ -204,7 +204,7 @@ export function helpView() {
 }
 
 const outsideAmounts = (windows) =>
-  PLAN_ROWS.filter(([key]) => windows?.[key])
+  PLAN_ROWS.filter(([key]) => windows?.[key]?.pct > 0)
     .map(([key, icon]) => `${icon} ${LABEL[key]} +${pct(windows[key].pct)}`)
     .join(' · ');
 
@@ -220,7 +220,7 @@ export function outsideView(event, deviceNames, outcome = null) {
     ? [OUTSIDE_TITLE, amounts, `✅ Counted for <b>${escapeHtml(event.device)}</b>. Tap another device to change.`]
     : [
         OUTSIDE_TITLE,
-        'Your plan went up while no device used Claude Code — likely Claude Desktop, claude.ai or the Chrome extension.',
+        "Your plan went up more than your devices' Claude Code explains — likely Claude Desktop, claude.ai or the Chrome extension.",
         amounts,
         '',
         "👉 <b>Whose was it?</b> It then counts toward that device's share and caps.",

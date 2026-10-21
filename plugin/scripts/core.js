@@ -79,7 +79,7 @@ export function windowPools(reports) {
 function outsideUsage(events, key, accountWin, knownDevices) {
   return events
     .filter((e) => e.windows?.[key] && sameWindow(e.windows[key].resetsAt, accountWin.resetsAt))
-    .filter((e) => !e.device || knownDevices.has(e.device))
+    .filter((e) => !e.split && (!e.device || knownDevices.has(e.device))) // split: shared by Claude Code usage
     .reduce(
       (acc, e) =>
         e.device
